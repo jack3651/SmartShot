@@ -49,7 +49,7 @@ g++ -municode -finput-charset=UTF-8 -O2 -s -o Snap.exe snapshot.cpp ^
     -mwindows -static -static-libgcc -static-libstdc++ ^
     -lgdiplus -lgdi32 -lshell32 -lole32 -luuid -lcomdlg32
 ```
-> 附的 `Snap.exe` 就是用這行編出來的,可自行重編比對。
+> Releases 頁面附的 `Snap.exe` 就是用這行編出來的,可自行重編比對。
 
 ### MSVC(Visual Studio)
 在「Developer Command Prompt for VS」中執行 **`build_msvc.bat`**。`/MT` 靜態連結,產出單一免安裝 exe。

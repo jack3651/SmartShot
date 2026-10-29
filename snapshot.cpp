@@ -313,6 +313,91 @@ static void ChooseDir() {
     }
 }
 
+// ---- 選單圖示 ---------------------------------------------
+// 用系統內建的圖示字型畫成 32bpp alpha 點陣圖：Win11 為 Segoe Fluent Icons，
+// Win10 為 Segoe MDL2 Assets（同一套字碼）。都沒有（Win7）就不加圖示。
+static int CALLBACK FontExistsProc(const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM lp) {
+    *(bool*)lp = true;
+    return 0;
+}
+
+static const wchar_t* IconFontFace(HDC dc) {
+    const wchar_t* faces[] = { L"Segoe Fluent Icons", L"Segoe MDL2 Assets" };
+    for (const wchar_t* face : faces) {
+        LOGFONTW lf = {};
+        lf.lfCharSet = DEFAULT_CHARSET;
+        lstrcpynW(lf.lfFaceName, face, LF_FACESIZE);
+        bool found = false;
+        EnumFontFamiliesExW(dc, &lf, FontExistsProc, (LPARAM)&found, 0);
+        if (found) return face;
+    }
+    return NULL;
+}
+
+// 選單會顯示在游標所在的螢幕，圖示依該螢幕的 DPI 縮放
+static UINT DpiAtPoint(POINT pt) {
+    typedef HRESULT (WINAPI *GetDpiForMonitorFn)(HMONITOR, int, UINT*, UINT*);
+    UINT dpi = 0;
+    HMODULE shcore = LoadLibraryW(L"shcore.dll");
+    if (shcore) {
+        GetDpiForMonitorFn f = (GetDpiForMonitorFn)(void*)GetProcAddress(shcore, "GetDpiForMonitor");
+        UINT dx, dy;
+        // 0 == MDT_EFFECTIVE_DPI
+        if (f && SUCCEEDED(f(MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST), 0, &dx, &dy)))
+            dpi = dy;
+        FreeLibrary(shcore);
+    }
+    if (!dpi) {
+        HDC dc = GetDC(NULL);
+        dpi = GetDeviceCaps(dc, LOGPIXELSY);
+        ReleaseDC(NULL, dc);
+    }
+    return dpi;
+}
+
+static HBITMAP MakeGlyphBitmap(HDC screen, const wchar_t* face, wchar_t glyph,
+                               int size, COLORREF color) {
+    BITMAPINFO bi = {};
+    bi.bmiHeader.biSize        = sizeof(bi.bmiHeader);
+    bi.bmiHeader.biWidth       = size;
+    bi.bmiHeader.biHeight      = -size;
+    bi.bmiHeader.biPlanes      = 1;
+    bi.bmiHeader.biBitCount    = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits = NULL;
+    HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, NULL, 0);
+    if (!bmp || !bits) return NULL;
+    ZeroMemory(bits, (size_t)size * size * 4);
+
+    // 黑底白字（灰階反鋸齒，不用 ClearType）畫出字形，亮度即為 alpha
+    HDC dc = CreateCompatibleDC(screen);
+    HGDIOBJ oldBmp = SelectObject(dc, bmp);
+    HFONT font = CreateFontW(-size, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY,
+                             DEFAULT_PITCH, face);
+    HGDIOBJ oldFont = SelectObject(dc, font);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(255, 255, 255));
+    RECT r = { 0, 0, size, size };
+    DrawTextW(dc, &glyph, 1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+    GdiFlush();
+    SelectObject(dc, oldFont);
+    SelectObject(dc, oldBmp);
+    DeleteObject(font);
+    DeleteDC(dc);
+
+    // 轉成選單需要的 premultiplied ARGB
+    BYTE* p = (BYTE*)bits;
+    for (int i = 0; i < size * size; ++i, p += 4) {
+        const BYTE a = p[1];
+        p[0] = (BYTE)(GetBValue(color) * a / 255);
+        p[1] = (BYTE)(GetGValue(color) * a / 255);
+        p[2] = (BYTE)(GetRValue(color) * a / 255);
+        p[3] = a;
+    }
+    return bmp;
+}
+
 // ---- 系統列選單 -------------------------------------------
 static void ShowMenu() {
     POINT pt;
@@ -326,10 +411,34 @@ static void ShowMenu() {
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, IDM_EXIT, L"結束");
 
+    // 選項前加小圖示（選單不會擁有點陣圖，關閉後要自己刪）。
+    // 「開機時自動啟動」不加：有圖示時 Win11 不畫勾勾，會看不出是否已開啟。
+    const struct { UINT id; wchar_t glyph; } icons[] = {
+        { IDM_OPENDIR,   0xE838 },   // 打開的資料夾
+        { IDM_CHOOSEDIR, 0xE8DE },   // 資料夾＋箭頭
+        { IDM_EXIT,      0xF3B1 },   // 離開
+    };
+    HBITMAP bmps[ARRAYSIZE(icons)] = {};
+    HDC screen = GetDC(NULL);
+    if (const wchar_t* face = IconFontFace(screen)) {
+        const int size = MulDiv(16, (int)DpiAtPoint(pt), 96);
+        for (size_t i = 0; i < ARRAYSIZE(icons); ++i) {
+            bmps[i] = MakeGlyphBitmap(screen, face, icons[i].glyph, size, GetSysColor(COLOR_MENUTEXT));
+            MENUITEMINFOW mii = {};
+            mii.cbSize   = sizeof(mii);
+            mii.fMask    = MIIM_BITMAP;
+            mii.hbmpItem = bmps[i];
+            if (bmps[i]) SetMenuItemInfoW(m, icons[i].id, FALSE, &mii);
+        }
+    }
+    ReleaseDC(NULL, screen);
+
     SetForegroundWindow(g_hwnd);
     TrackPopupMenu(m, TPM_RIGHTBUTTON, pt.x, pt.y, 0, g_hwnd, NULL);
     PostMessageW(g_hwnd, WM_NULL, 0, 0);  // MSDN 建議：確保選單正常關閉
     DestroyMenu(m);
+    for (HBITMAP b : bmps)
+        if (b) DeleteObject(b);
 }
 
 // ---- 視窗訊息 ---------------------------------------------

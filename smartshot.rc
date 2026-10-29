@@ -1,4 +1,38 @@
+#include <winver.h>
 #include "resource.h"
 
 IDI_APP     ICON "smartshot.ico"
 IDR_SHUTTER WAVE "shutter.wav"
+
+// 介面上免費版與 Pro 都叫 SmartShot；只有原始檔名分得出是哪一版（開發測試用）
+#ifdef SMARTSHOT_PRO
+#define SMARTSHOT_EXE_NAME "SmartShotPro.exe"
+#else
+#define SMARTSHOT_EXE_NAME "SmartShot.exe"
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    SMARTSHOT_VERSION_NUM
+ PRODUCTVERSION SMARTSHOT_VERSION_NUM
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040404B0"
+        BEGIN
+            VALUE "FileDescription",  "SmartShot"
+            VALUE "FileVersion",      SMARTSHOT_VERSION_STR
+            VALUE "ProductName",      "SmartShot"
+            VALUE "ProductVersion",   SMARTSHOT_VERSION_STR
+            VALUE "OriginalFilename", SMARTSHOT_EXE_NAME
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0404, 1200
+    END
+END

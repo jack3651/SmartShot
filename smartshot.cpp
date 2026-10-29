@@ -75,12 +75,8 @@ using namespace Gdiplus;
 #define BACKUP_HOTKEY_VK   'S'
 #define BACKUP_HOTKEY_TEXT L"Ctrl+Alt+S"
 
-// 顯示用名稱（系統列提示、氣泡、對話框標題）
-#ifdef SMARTSHOT_PRO
-#define APP_TITLE L"SmartShot Pro"
-#else
+// 顯示用名稱（系統列提示、氣泡、對話框標題）。免費版與 Pro 一樣：Pro 是解鎖的功能，不是另一個產品。
 #define APP_TITLE L"SmartShot"
-#endif
 
 static const wchar_t* APP_NAME  = L"SmartShot";            // 開機自啟的值名稱
 static const wchar_t* REG_APP   = L"Software\\SmartShot";

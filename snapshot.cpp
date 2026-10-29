@@ -7,7 +7,7 @@
 //    - 「開機時自動啟動」可勾選切換（寫入 HKCU\...\Run）
 //    - 存檔資料夾記憶於登錄檔
 //    - 單一免安裝 exe，無第三方相依
-//    - 備援熱鍵 Ctrl+Shift+P
+//    - 備援熱鍵 Ctrl+Alt+S
 //  v2 擷取流程（見《SmartShot 擷取流程規格》）：
 //    - 免費版只用 GDI；Pro 版（SMARTSHOT_PRO）全黑或獨佔全螢幕時改用 DXGI
 //    - 截圖成功只播快門聲，不跳任何視窗；全黑／失敗播錯誤音
@@ -67,9 +67,9 @@ using namespace Gdiplus;
 #define IDM_EXIT        1005
 
 // ---- 固定備援熱鍵（PrtSc 被佔用或被遊戲攔走時使用） -------
-#define BACKUP_HOTKEY_MOD  (MOD_CONTROL | MOD_SHIFT)
-#define BACKUP_HOTKEY_VK   'P'
-#define BACKUP_HOTKEY_TEXT L"Ctrl+Shift+P"
+#define BACKUP_HOTKEY_MOD  (MOD_CONTROL | MOD_ALT)
+#define BACKUP_HOTKEY_VK   'S'
+#define BACKUP_HOTKEY_TEXT L"Ctrl+Alt+S"
 
 static const wchar_t* APP_NAME = L"SnapShot";
 static const wchar_t* REG_APP  = L"Software\\SnapShot";

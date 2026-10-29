@@ -7,7 +7,9 @@
 //    - 「開機時自動啟動」可勾選切換（寫入 HKCU\...\Run）
 //    - 存檔資料夾記憶於登錄檔
 //    - 單一免安裝 exe，無第三方相依
+//    - 備援熱鍵 Ctrl+Shift+P
 //  v2 擷取流程（見《SmartShot 擷取流程規格》）：
+//    - 免費版只用 GDI；Pro 版（SMARTSHOT_PRO）全黑或獨佔全螢幕時改用 DXGI
 //    - 截圖成功只播快門聲，不跳任何視窗；全黑／失敗播錯誤音
 //    - 主執行緒只做擷取與全黑掃描，PNG 由背景執行緒編碼
 //  v2 首次使用（見《SmartShot 首次使用流程》）：
@@ -36,6 +38,9 @@
 #include "capture_gdi.h"
 #include "saver.h"
 #include "feedback.h"
+#ifdef SMARTSHOT_PRO
+#include "capture_dxgi.h"   // 私有 repo
+#endif
 
 // MSVC 用；MinGW 會忽略（改在命令列 -l 指定）
 #pragma comment(lib, "gdiplus.lib")
@@ -53,13 +58,18 @@ using namespace Gdiplus;
 // ---- 訊息與選單 ID ----------------------------------------
 #define WM_TRAYICON     (WM_APP + 1)
 #define WM_SAVEFAILED   (WM_APP + 2)
-#define ID_HOTKEY_PRTSC 1
-#define ID_TIMER_RETRY  2
-#define IDM_CAPTURE     1001
+#define ID_HOTKEY_PRTSC  1
+#define ID_TIMER_RETRY   2
+#define ID_HOTKEY_BACKUP 3
 #define IDM_OPENDIR     1002
 #define IDM_CHOOSEDIR   1003
 #define IDM_AUTOSTART   1004
 #define IDM_EXIT        1005
+
+// ---- 固定備援熱鍵（PrtSc 被佔用或被遊戲攔走時使用） -------
+#define BACKUP_HOTKEY_MOD  (MOD_CONTROL | MOD_SHIFT)
+#define BACKUP_HOTKEY_VK   'P'
+#define BACKUP_HOTKEY_TEXT L"Ctrl+Shift+P"
 
 static const wchar_t* APP_NAME = L"SnapShot";
 static const wchar_t* REG_APP  = L"Software\\SnapShot";
@@ -70,6 +80,8 @@ static HWND         g_hwnd   = NULL;
 static ULONG_PTR    g_gdiTok = 0;
 static std::wstring g_saveDir;
 static UINT         g_wmTaskbarCreated = 0;   // Explorer 重啟後要重新加入系統列圖示
+static bool         g_prtscOk  = false;       // PrtSc 熱鍵已註冊
+static bool         g_backupOk = false;       // 備援熱鍵已註冊
 
 // ---- 高 DPI：per-monitor v2（動態載入，舊系統自動退回） ----
 static void EnableDpiAwareness() {
@@ -178,7 +190,40 @@ static void Notify(const wchar_t* title, const wchar_t* msg) {
 }
 
 // ---- 熱鍵：擷取 → 全黑掃描 → 播放聲音 → 排入存檔 ---------
-static void OnHotkey_Free() {
+#ifdef SMARTSHOT_PRO
+enum class CaptureMode { GDI, DXGI };
+static CaptureMode g_mode = CaptureMode::GDI;   // 每次啟動都從 GDI 開始，不存檔
+
+static void Finish(Frame& f, bool ok) {
+    if (ok) PlayShutter(); else PlayError();
+    // 全黑也照樣存，避免漏掉真的黑幕畫面
+    if (!f.empty()) EnqueueSave(std::move(f), g_saveDir);
+}
+
+static void OnHotkey() {
+    HMONITOR mon = GetTargetMonitor();
+    Frame f;
+
+    if (g_mode == CaptureMode::GDI && !IsExclusiveFullscreen()) {
+        if (CaptureGDI(mon, f) && !IsAllBlack(f)) {
+            Finish(f, true);
+            return;
+        }
+        // 全黑（或 GDI 失敗）→ 同一次按鍵立刻改用 DXGI
+        f = Frame{};
+    }
+    // 獨佔全螢幕也直接走到這裡
+
+    if (CaptureDXGI(mon, f)) {
+        g_mode = CaptureMode::DXGI;     // 本次執行期間之後都用 DXGI
+    } else {
+        f = Frame{};
+        CaptureGDI(mon, f);              // DXGI 出錯 → 這一張用 GDI，模式不變
+    }
+    Finish(f, !f.empty() && !IsAllBlack(f));
+}
+#else
+static void OnHotkey() {
     HMONITOR mon = GetTargetMonitor();
     Frame f;
     bool captured = CaptureGDI(mon, f);
@@ -193,6 +238,7 @@ static void OnHotkey_Free() {
     // 全黑也照樣存，避免漏掉真的黑幕畫面
     if (!f.empty()) EnqueueSave(std::move(f), g_saveDir);
 }
+#endif
 
 // ---- 存檔位置是否在 OneDrive 同步資料夾內 -----------------
 static bool IsUnderOneDrive(const std::wstring& path) {
@@ -213,7 +259,8 @@ static void MaybeShowFirstRunTip() {
     if (IsFirstRunDone() || !CanShowPopup()) return;   // 無法顯示就等下次啟動
 
     std::wstring msg =
-        L"按一下 PrtSc 試試看，聽到快門聲就完成設定。\n存檔位置：" + g_saveDir;
+        L"按一下 PrtSc 試試看，聽到快門聲就完成設定。\n"
+        L"備援熱鍵：" BACKUP_HOTKEY_TEXT L"\n存檔位置：" + g_saveDir;
     if (IsUnderOneDrive(g_saveDir))
         msg += L"\n此資料夾會同步到 OneDrive，可從右鍵選單更改。";
     Notify(L"SnapShot 已在背景執行", msg.c_str());
@@ -221,10 +268,15 @@ static void MaybeShowFirstRunTip() {
     SetFirstRunDone();
 }
 
-// ---- PrtSc 熱鍵：註冊失敗時引導，並每秒自動重試 -----------
-static bool TryRegisterPrtSc() {
-    // MOD_NOREPEAT：按住 PrtSc 不會連拍
-    return RegisterHotKey(g_hwnd, ID_HOTKEY_PRTSC, MOD_NOREPEAT, VK_SNAPSHOT) != FALSE;
+// ---- 熱鍵：註冊失敗時引導，並每秒自動重試 -----------------
+// 回傳兩組熱鍵是否都已註冊。MOD_NOREPEAT：按住不會連拍。
+static bool TryRegisterHotkeys() {
+    if (!g_prtscOk)
+        g_prtscOk = RegisterHotKey(g_hwnd, ID_HOTKEY_PRTSC, MOD_NOREPEAT, VK_SNAPSHOT) != FALSE;
+    if (!g_backupOk)
+        g_backupOk = RegisterHotKey(g_hwnd, ID_HOTKEY_BACKUP,
+                                    BACKUP_HOTKEY_MOD | MOD_NOREPEAT, BACKUP_HOTKEY_VK) != FALSE;
+    return g_prtscOk && g_backupOk;
 }
 
 static void ShowPrtScGuide() {
@@ -234,7 +286,8 @@ static void ShowPrtScGuide() {
         L"把「使用 Print Screen 鍵開啟螢幕擷取」關掉嗎？\n\n"
         L"如果不是剪取工具，可能是 OneDrive、Dropbox 或其他截圖軟體的截圖功能，"
         L"請先關閉該功能。\n\n"
-        L"關掉後立即生效，不用重開本程式。",
+        L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
+        BACKUP_HOTKEY_TEXT L" 截圖。",
         L"SnapShot", MB_YESNO | MB_ICONINFORMATION);
     if (r == IDYES) {
         ShellExecuteW(NULL, L"open", L"ms-settings:easeofaccess-keyboard",
@@ -264,9 +317,8 @@ static void ChooseDir() {
 static void ShowMenu() {
     POINT pt;
     GetCursorPos(&pt);
+    // 極簡選單：截圖只靠熱鍵（全螢幕遊戲裡點不到選單）
     HMENU m = CreatePopupMenu();
-    AppendMenuW(m, MF_STRING, IDM_CAPTURE,  L"立即截圖  (PrtSc)");
-    AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, IDM_OPENDIR,  L"開啟儲存資料夾");
     AppendMenuW(m, MF_STRING, IDM_CHOOSEDIR, L"選擇儲存資料夾…");
     AppendMenuW(m, MF_STRING | (IsAutoStart() ? MF_CHECKED : 0),
@@ -291,20 +343,22 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_TRAYICON:
         if (LOWORD(lp) == WM_RBUTTONUP)
             ShowMenu();
-        else if (LOWORD(lp) == WM_LBUTTONDBLCLK)
-            OnHotkey_Free();
         return 0;
 
     case WM_HOTKEY:
-        if (wp == ID_HOTKEY_PRTSC)
-            OnHotkey_Free();
+        if (wp == ID_HOTKEY_PRTSC || wp == ID_HOTKEY_BACKUP)
+            OnHotkey();
         return 0;
 
     case WM_TIMER:
-        if (wp == ID_TIMER_RETRY && TryRegisterPrtSc()) {
-            KillTimer(hwnd, ID_TIMER_RETRY);
-            PlayShutter();            // 用快門聲告訴使用者「可以用了」
-            MaybeShowFirstRunTip();
+        if (wp == ID_TIMER_RETRY) {
+            bool hadPrtSc = g_prtscOk;
+            if (TryRegisterHotkeys())
+                KillTimer(hwnd, ID_TIMER_RETRY);
+            if (!hadPrtSc && g_prtscOk) {
+                PlayShutter();        // 用快門聲告訴使用者「可以用了」
+                MaybeShowFirstRunTip();
+            }
         }
         return 0;
 
@@ -318,7 +372,6 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_COMMAND:
         switch (LOWORD(wp)) {
-        case IDM_CAPTURE:   OnHotkey_Free(); break;
         case IDM_OPENDIR:
             ShellExecuteW(NULL, L"open", g_saveDir.c_str(), NULL, NULL, SW_SHOWNORMAL);
             break;
@@ -332,6 +385,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         KillTimer(hwnd, ID_TIMER_RETRY);
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
         UnregisterHotKey(hwnd, ID_HOTKEY_PRTSC);
+        UnregisterHotKey(hwnd, ID_HOTKEY_BACKUP);
         PostQuitMessage(0);
         return 0;
     }
@@ -378,18 +432,18 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     g_nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAYICON;
     g_nid.hIcon            = LoadIcon(NULL, IDI_APPLICATION);
-    lstrcpynW(g_nid.szTip, L"一鍵截圖 SnapShot", ARRAYSIZE(g_nid.szTip));
+    lstrcpynW(g_nid.szTip, L"一鍵截圖 SnapShot（PrtSc／" BACKUP_HOTKEY_TEXT L"）",
+              ARRAYSIZE(g_nid.szTip));
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
-    // 全域快捷鍵：只註冊 PrtSc。失敗就引導，並每秒自動重試。
+    // 全域快捷鍵：PrtSc＋備援熱鍵。失敗就每秒自動重試；PrtSc 失敗另外引導。
     // 先啟動計時器：引導視窗開著時（MessageBox 仍會處理訊息）就能偵測到使用者關掉設定。
-    if (TryRegisterPrtSc()) {
-        MaybeShowFirstRunTip();
-    } else {
+    if (!TryRegisterHotkeys())
         SetTimer(g_hwnd, ID_TIMER_RETRY, 1000, NULL);
-        if (CanShowPopup())
-            ShowPrtScGuide();
-    }
+    if (g_prtscOk)
+        MaybeShowFirstRunTip();
+    else if (CanShowPopup())
+        ShowPrtScGuide();
 
     MSG m;
     while (GetMessageW(&m, NULL, 0, 0)) {

@@ -83,6 +83,7 @@ static UINT         g_wmTaskbarCreated = 0;   // Explorer 重啟後要重新加�
 static bool         g_prtscOk  = false;       // PrtSc 熱鍵已註冊
 static bool         g_backupOk = false;       // 備援熱鍵已註冊
 static bool         g_prtscReady = false;     // PrtSc 真的能用（已註冊且沒被剪取工具攔走）
+static int          g_reregTicks = 0;         // 剪取工具剛釋放 PrtSc 後，還要重新註冊幾次
 
 // ---- 高 DPI：per-monitor v2（動態載入，舊系統自動退回） ----
 static void EnableDpiAwareness() {
@@ -295,6 +296,25 @@ static bool IsPrtScReady() {
     return g_prtscOk && !IsPrtScUsedBySnipping();
 }
 
+// 實測：剪取工具佔用期間註冊的 PrtSc 熱鍵，關掉開關後仍收不到按鍵（重開程式才正常），
+// 所以開關關掉後要重新註冊一次。
+static void ReRegisterPrtSc() {
+    UnregisterHotKey(g_hwnd, ID_HOTKEY_PRTSC);
+    g_prtscOk = RegisterHotKey(g_hwnd, ID_HOTKEY_PRTSC, MOD_NOREPEAT, VK_SNAPSHOT) != FALSE;
+}
+
+// 剪取工具開關所在的設定頁：新版 Win11 在「藍牙與裝置 → 鍵盤」（實測 build 26200），
+// 舊版只有「協助工具 → 鍵盤」。
+static const wchar_t* KeyboardSettingsUri() {
+    wchar_t build[16];
+    DWORD sz = sizeof(build);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",
+                     L"CurrentBuild", RRF_RT_REG_SZ, NULL, build, &sz) == ERROR_SUCCESS &&
+        _wtoi(build) >= 26200)
+        return L"ms-settings:devices-keyboard";
+    return L"ms-settings:easeofaccess-keyboard";
+}
+
 static void ShowPrtScGuide(bool snipping) {
     const wchar_t* msg = snipping
         ? L"Print Screen 鍵目前被 Windows 剪取工具使用。\n\n"
@@ -310,8 +330,7 @@ static void ShowPrtScGuide(bool snipping) {
           L"要打開 Windows 鍵盤設定看看嗎？";
     int r = MessageBoxW(g_hwnd, msg, L"SnapShot", MB_YESNO | MB_ICONINFORMATION);
     if (r == IDYES) {
-        ShellExecuteW(NULL, L"open", L"ms-settings:easeofaccess-keyboard",
-                      NULL, NULL, SW_SHOWNORMAL);
+        ShellExecuteW(NULL, L"open", KeyboardSettingsUri(), NULL, NULL, SW_SHOWNORMAL);
     }
 }
 
@@ -483,12 +502,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (wp == ID_TIMER_RETRY) {
             bool allRegistered = TryRegisterHotkeys();
             bool ready = IsPrtScReady();
-            if (allRegistered && ready)
-                KillTimer(hwnd, ID_TIMER_RETRY);
             if (ready && !g_prtscReady) {
+                // 剛釋放 PrtSc：之後幾秒每秒重新註冊，避開系統還沒完全放手的空窗
+                g_reregTicks = 3;
                 PlayShutter();        // 用快門聲告訴使用者「可以用了」
                 MaybeShowFirstRunTip();
             }
+            if (g_reregTicks > 0) {
+                --g_reregTicks;
+                ReRegisterPrtSc();
+                allRegistered = g_prtscOk && g_backupOk;
+                ready = IsPrtScReady();
+            }
+            if (allRegistered && ready && g_reregTicks == 0)
+                KillTimer(hwnd, ID_TIMER_RETRY);
             g_prtscReady = ready;
         }
         return 0;

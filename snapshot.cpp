@@ -1,16 +1,18 @@
 // ============================================================
-//  一鍵截圖 SnapShot (合併版, C++ / Win32 / GDI+)
+//  一鍵截圖 SnapShot (C++ / Win32 / GDI+)
 //  功能：
 //    - 系統列常駐（右鍵選單）
-//    - 全域快捷鍵 PrintScreen -> 全螢幕截圖（僅此一組）
+//    - 全域快捷鍵 PrintScreen -> 截取前景視窗所在的螢幕
 //    - 系統列選單內建「選擇資料夾」對話框
 //    - 「開機時自動啟動」可勾選切換（寫入 HKCU\...\Run）
 //    - 存檔資料夾記憶於登錄檔
 //    - 單一免安裝 exe，無第三方相依
-//  相較原始 SnapShot 的三項強化：
-//    (1) 檔名防覆蓋：同一秒多張自動加 _1、_2…（原版會覆蓋）
-//    (2) per-monitor DPI v2：混合 DPI 多螢幕也抓正確像素
-//    (3) PrtSc 註冊失敗會跳提示並說明修法（原版靜默無反應）
+//  v2 擷取流程（見《SmartShot 擷取流程規格》）：
+//    - 截圖成功只播快門聲，不跳任何視窗；全黑／失敗播錯誤音
+//    - 主執行緒只做擷取與全黑掃描，PNG 由背景執行緒編碼
+//  v2 首次使用（見《SmartShot 首次使用流程》）：
+//    - PrtSc 被佔用時引導並每秒自動重試，成功時播快門聲
+//    - 第一次執行顯示一次性提示氣泡（含 OneDrive 同步提醒）
 // ============================================================
 #ifndef UNICODE
 #define UNICODE
@@ -28,6 +30,12 @@
 #include <shlobj.h>
 #include <gdiplus.h>
 #include <string>
+#include <utility>
+
+#include "capture_common.h"
+#include "capture_gdi.h"
+#include "saver.h"
+#include "feedback.h"
 
 // MSVC 用；MinGW 會忽略（改在命令列 -l 指定）
 #pragma comment(lib, "gdiplus.lib")
@@ -36,11 +44,17 @@
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 
+#ifndef MOD_NOREPEAT
+#define MOD_NOREPEAT 0x4000
+#endif
+
 using namespace Gdiplus;
 
 // ---- 訊息與選單 ID ----------------------------------------
 #define WM_TRAYICON     (WM_APP + 1)
+#define WM_SAVEFAILED   (WM_APP + 2)
 #define ID_HOTKEY_PRTSC 1
+#define ID_TIMER_RETRY  2
 #define IDM_CAPTURE     1001
 #define IDM_OPENDIR     1002
 #define IDM_CHOOSEDIR   1003
@@ -55,6 +69,7 @@ static NOTIFYICONDATAW g_nid = {};
 static HWND         g_hwnd   = NULL;
 static ULONG_PTR    g_gdiTok = 0;
 static std::wstring g_saveDir;
+static UINT         g_wmTaskbarCreated = 0;   // Explorer 重啟後要重新加入系統列圖示
 
 // ---- 高 DPI：per-monitor v2（動態載入，舊系統自動退回） ----
 static void EnableDpiAwareness() {
@@ -101,6 +116,28 @@ static void SaveSaveDir(const std::wstring& dir) {
     }
 }
 
+// ---- 首次執行標記（登錄檔 FirstRunDone = 1） --------------
+static bool IsFirstRunDone() {
+    HKEY hKey;
+    DWORD v = 0, sz = sizeof(v), type = 0;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_APP, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
+        LONG r = RegQueryValueExW(hKey, L"FirstRunDone", NULL, &type, (LPBYTE)&v, &sz);
+        RegCloseKey(hKey);
+        return r == ERROR_SUCCESS && type == REG_DWORD && v == 1;
+    }
+    return false;
+}
+
+static void SetFirstRunDone() {
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_APP, 0, NULL, 0,
+                        KEY_SET_VALUE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
+        DWORD v = 1;
+        RegSetValueExW(hKey, L"FirstRunDone", 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
+        RegCloseKey(hKey);
+    }
+}
+
 // ---- 開機自啟 ---------------------------------------------
 static bool IsAutoStart() {
     HKEY hKey;
@@ -130,43 +167,7 @@ static void SetAutoStart(bool on) {
     }
 }
 
-// ---- PNG 編碼器 CLSID -------------------------------------
-static int GetEncoderClsid(const WCHAR* mime, CLSID* pClsid) {
-    UINT num = 0, size = 0;
-    GetImageEncodersSize(&num, &size);
-    if (size == 0) return -1;
-    ImageCodecInfo* info = (ImageCodecInfo*)malloc(size);
-    if (!info) return -1;
-    GetImageEncoders(num, size, info);
-    int ret = -1;
-    for (UINT i = 0; i < num; ++i) {
-        if (wcscmp(info[i].MimeType, mime) == 0) {
-            *pClsid = info[i].Clsid;
-            ret = (int)i;
-            break;
-        }
-    }
-    free(info);
-    return ret;
-}
-
-// ---- 產生不重複的檔名（強化：同一秒不覆蓋） ---------------
-static std::wstring MakeFilePath(const std::wstring& dir) {
-    SYSTEMTIME st;
-    GetLocalTime(&st);
-    wchar_t base[64];
-    swprintf(base, 64, L"Snap_%04d%02d%02d_%02d%02d%02d",
-             st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-    for (int i = 0; ; ++i) {
-        std::wstring path = dir + L"\\" + base;
-        if (i > 0) path += L"_" + std::to_wstring(i);
-        path += L".png";
-        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES)
-            return path;
-    }
-}
-
-// ---- 系統列氣泡通知 ---------------------------------------
+// ---- 系統列氣泡通知（截圖成功時不使用） -------------------
 static void Notify(const wchar_t* title, const wchar_t* msg) {
     g_nid.uFlags = NIF_INFO;
     lstrcpynW(g_nid.szInfoTitle, title, ARRAYSIZE(g_nid.szInfoTitle));
@@ -176,38 +177,69 @@ static void Notify(const wchar_t* title, const wchar_t* msg) {
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; // 還原
 }
 
-// ---- 全螢幕截圖 -------------------------------------------
-static void CaptureFullScreen() {
-    int x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-    int y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-    int w = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-    int h = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+// ---- 熱鍵：擷取 → 全黑掃描 → 播放聲音 → 排入存檔 ---------
+static void OnHotkey_Free() {
+    HMONITOR mon = GetTargetMonitor();
+    Frame f;
+    bool captured = CaptureGDI(mon, f);
 
-    HDC hScreen = GetDC(NULL);
-    HDC hDC     = CreateCompatibleDC(hScreen);
-    HBITMAP hBmp = CreateCompatibleBitmap(hScreen, w, h);
-    HGDIOBJ old  = SelectObject(hDC, hBmp);
-    // CAPTUREBLT 連圖層/半透明視窗也一起擷取
-    BOOL blt = BitBlt(hDC, 0, 0, w, h, hScreen, x, y, SRCCOPY | CAPTUREBLT);
-    SelectObject(hDC, old);
-
-    bool ok = false;
-    std::wstring path;
-    if (blt) {
-        Bitmap bmp(hBmp, (HPALETTE)NULL);
-        CLSID clsid;
-        if (GetEncoderClsid(L"image/png", &clsid) >= 0) {
-            SHCreateDirectoryExW(NULL, g_saveDir.c_str(), NULL); // 資料夾不存在就建立
-            path = MakeFilePath(g_saveDir);
-            ok = (bmp.Save(path.c_str(), &clsid, NULL) == Ok);
-        }
+    if (!captured || IsAllBlack(f)) {
+        PlayError();
+    } else if (IsExclusiveFullscreen()) {
+        PlayWarning();   // 可能截到桌面而非遊戲；可作為升級 Pro 的提示點
+    } else {
+        PlayShutter();
     }
-    DeleteObject(hBmp);
-    DeleteDC(hDC);
-    ReleaseDC(NULL, hScreen);
+    // 全黑也照樣存，避免漏掉真的黑幕畫面
+    if (!f.empty()) EnqueueSave(std::move(f), g_saveDir);
+}
 
-    if (ok) { MessageBeep(MB_OK);        Notify(L"截圖完成", path.c_str()); }
-    else    { MessageBeep(MB_ICONERROR); Notify(L"截圖失敗", L"無法儲存檔案"); }
+// ---- 存檔位置是否在 OneDrive 同步資料夾內 -----------------
+static bool IsUnderOneDrive(const std::wstring& path) {
+    const wchar_t* vars[] = { L"OneDrive", L"OneDriveConsumer", L"OneDriveCommercial" };
+    for (const wchar_t* v : vars) {
+        wchar_t root[MAX_PATH];
+        DWORD n = GetEnvironmentVariableW(v, root, MAX_PATH);
+        if (n == 0 || n >= MAX_PATH || path.size() < n) continue;
+        if (_wcsnicmp(path.c_str(), root, n) == 0 &&
+            (path.size() == n || path[n] == L'\\'))
+            return true;
+    }
+    return false;
+}
+
+// ---- 首次提示氣泡：確認熱鍵有效、聽得到快門聲、告知存檔位置 --
+static void MaybeShowFirstRunTip() {
+    if (IsFirstRunDone() || !CanShowPopup()) return;   // 無法顯示就等下次啟動
+
+    std::wstring msg =
+        L"按一下 PrtSc 試試看，聽到快門聲就完成設定。\n存檔位置：" + g_saveDir;
+    if (IsUnderOneDrive(g_saveDir))
+        msg += L"\n此資料夾會同步到 OneDrive，可從右鍵選單更改。";
+    Notify(L"SnapShot 已在背景執行", msg.c_str());
+
+    SetFirstRunDone();
+}
+
+// ---- PrtSc 熱鍵：註冊失敗時引導，並每秒自動重試 -----------
+static bool TryRegisterPrtSc() {
+    // MOD_NOREPEAT：按住 PrtSc 不會連拍
+    return RegisterHotKey(g_hwnd, ID_HOTKEY_PRTSC, MOD_NOREPEAT, VK_SNAPSHOT) != FALSE;
+}
+
+static void ShowPrtScGuide() {
+    int r = MessageBoxW(g_hwnd,
+        L"Print Screen 鍵被其他程式佔用了。\n\n"
+        L"最常見的是 Windows 11 剪取工具。要現在打開設定，"
+        L"把「使用 Print Screen 鍵開啟螢幕擷取」關掉嗎？\n\n"
+        L"如果不是剪取工具，可能是 OneDrive、Dropbox 或其他截圖軟體的截圖功能，"
+        L"請先關閉該功能。\n\n"
+        L"關掉後立即生效，不用重開本程式。",
+        L"SnapShot", MB_YESNO | MB_ICONINFORMATION);
+    if (r == IDYES) {
+        ShellExecuteW(NULL, L"open", L"ms-settings:easeofaccess-keyboard",
+                      NULL, NULL, SW_SHOWNORMAL);
+    }
 }
 
 // ---- 選擇資料夾（內建對話框） -----------------------------
@@ -250,22 +282,43 @@ static void ShowMenu() {
 
 // ---- 視窗訊息 ---------------------------------------------
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (g_wmTaskbarCreated && msg == g_wmTaskbarCreated) {
+        Shell_NotifyIconW(NIM_ADD, &g_nid);   // Explorer 重啟，重新加入圖示
+        return 0;
+    }
+
     switch (msg) {
     case WM_TRAYICON:
         if (LOWORD(lp) == WM_RBUTTONUP)
             ShowMenu();
         else if (LOWORD(lp) == WM_LBUTTONDBLCLK)
-            CaptureFullScreen();
+            OnHotkey_Free();
         return 0;
 
     case WM_HOTKEY:
         if (wp == ID_HOTKEY_PRTSC)
-            CaptureFullScreen();
+            OnHotkey_Free();
+        return 0;
+
+    case WM_TIMER:
+        if (wp == ID_TIMER_RETRY && TryRegisterPrtSc()) {
+            KillTimer(hwnd, ID_TIMER_RETRY);
+            PlayShutter();            // 用快門聲告訴使用者「可以用了」
+            MaybeShowFirstRunTip();
+        }
+        return 0;
+
+    case WM_SAVEFAILED:
+        PlayError();
+        if (CanShowPopup()) {
+            std::wstring msg = L"無法儲存到：" + g_saveDir;
+            Notify(L"截圖存檔失敗", msg.c_str());
+        }
         return 0;
 
     case WM_COMMAND:
         switch (LOWORD(wp)) {
-        case IDM_CAPTURE:   CaptureFullScreen(); break;
+        case IDM_CAPTURE:   OnHotkey_Free(); break;
         case IDM_OPENDIR:
             ShellExecuteW(NULL, L"open", g_saveDir.c_str(), NULL, NULL, SW_SHOWNORMAL);
             break;
@@ -276,6 +329,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_DESTROY:
+        KillTimer(hwnd, ID_TIMER_RETRY);
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
         UnregisterHotKey(hwnd, ID_HOTKEY_PRTSC);
         PostQuitMessage(0);
@@ -300,15 +354,22 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     g_saveDir = LoadSaveDir();
 
-    // 隱形視窗（承載熱鍵與系統列訊息）
+    // 隱形視窗（承載熱鍵與系統列訊息）。
+    // 不用 HWND_MESSAGE：訊息專用視窗收不到 TaskbarCreated 廣播。
     WNDCLASSW wc = {};
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInst;
     wc.lpszClassName = L"SnapShotWndClass";
     RegisterClassW(&wc);
-    g_hwnd = CreateWindowExW(0, wc.lpszClassName, L"SnapShot",
-                             0, 0, 0, 0, 0,
-                             HWND_MESSAGE, NULL, hInst, NULL);
+    g_hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"SnapShot",
+                             WS_POPUP, 0, 0, 0, 0,
+                             NULL, NULL, hInst, NULL);
+
+    g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    // 以系統管理員身分執行時，仍要收得到 Explorer 送來的 TaskbarCreated
+    ChangeWindowMessageFilterEx(g_hwnd, g_wmTaskbarCreated, MSGFLT_ALLOW, NULL);
+
+    SaverStart(g_hwnd, WM_SAVEFAILED);
 
     // 系統列圖示
     g_nid.cbSize           = sizeof(g_nid);
@@ -320,19 +381,15 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     lstrcpynW(g_nid.szTip, L"一鍵截圖 SnapShot", ARRAYSIZE(g_nid.szTip));
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
-    // 全域快捷鍵：只註冊 PrtSc，失敗要讓使用者知道（強化點 3）
-    if (!RegisterHotKey(g_hwnd, ID_HOTKEY_PRTSC, 0, VK_SNAPSHOT)) {
-        MessageBoxW(g_hwnd,
-            L"無法註冊 Print Screen 熱鍵。\n\n"
-            L"可能被其他截圖軟體佔用，或 Windows 11 的\n"
-            L"「使用 Print Screen 鍵開啟螢幕擷取畫面」設定攔截了它。\n\n"
-            L"你仍可用系統列圖示的「立即截圖」或雙擊圖示來截圖。\n"
-            L"若要修好 PrtSc：設定 → 協助工具 → 鍵盤 → 關閉該選項，再重開本程式。",
-            L"熱鍵註冊失敗", MB_OK | MB_ICONWARNING);
+    // 全域快捷鍵：只註冊 PrtSc。失敗就引導，並每秒自動重試。
+    // 先啟動計時器：引導視窗開著時（MessageBox 仍會處理訊息）就能偵測到使用者關掉設定。
+    if (TryRegisterPrtSc()) {
+        MaybeShowFirstRunTip();
+    } else {
+        SetTimer(g_hwnd, ID_TIMER_RETRY, 1000, NULL);
+        if (CanShowPopup())
+            ShowPrtScGuide();
     }
-
-    Notify(L"一鍵截圖已啟動",
-           L"按 Print Screen 截圖；右鍵圖示可選資料夾與設定開機自啟");
 
     MSG m;
     while (GetMessageW(&m, NULL, 0, 0)) {
@@ -340,6 +397,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
         DispatchMessageW(&m);
     }
 
+    SaverStop();            // 等排隊中的截圖存完
     GdiplusShutdown(g_gdiTok);
     OleUninitialize();
     if (mtx) CloseHandle(mtx);

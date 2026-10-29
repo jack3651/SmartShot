@@ -53,7 +53,7 @@ static std::wstring MakeFilePath(const std::wstring& dir) {
     SYSTEMTIME st;
     GetLocalTime(&st);
     wchar_t base[64];
-    swprintf(base, 64, L"Snap_%04d%02d%02d_%02d%02d%02d",
+    swprintf(base, 64, L"SmartShot_%04d%02d%02d_%02d%02d%02d",
              st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
     for (int i = 0; ; ++i) {
         std::wstring path = dir + L"\\" + base;

@@ -1,5 +1,5 @@
 // ============================================================
-//  一鍵截圖 SnapShot (C++ / Win32 / GDI+)
+//  SmartShot 一鍵截圖 (C++ / Win32 / GDI+)（v1 時名為 SnapShot）
 //  功能：
 //    - 系統列常駐（右鍵選單）
 //    - 全域快捷鍵 PrintScreen -> 截取前景視窗所在的螢幕
@@ -15,6 +15,7 @@
 //  v2 首次使用（見《SmartShot 首次使用流程》）：
 //    - PrtSc 被佔用時引導並每秒自動重試，成功時播快門聲
 //    - 第一次執行顯示一次性提示氣泡（含 OneDrive 同步提醒）
+//    - 手動開啟時提示「已在背景執行」；開機自啟（/autostart）時不提示
 // ============================================================
 #ifndef UNICODE
 #define UNICODE
@@ -38,6 +39,7 @@
 #include "capture_gdi.h"
 #include "saver.h"
 #include "feedback.h"
+#include "resource.h"
 #ifdef SMARTSHOT_PRO
 #include "capture_dxgi.h"   // 私有 repo
 #endif
@@ -58,6 +60,7 @@ using namespace Gdiplus;
 // ---- 訊息與選單 ID ----------------------------------------
 #define WM_TRAYICON     (WM_APP + 1)
 #define WM_SAVEFAILED   (WM_APP + 2)
+#define WM_ALREADYRUNNING (WM_APP + 3)   // 第二個執行個體通知已在執行的那個
 #define ID_HOTKEY_PRTSC  1
 #define ID_TIMER_RETRY   2
 #define ID_HOTKEY_BACKUP 3
@@ -72,9 +75,23 @@ using namespace Gdiplus;
 #define BACKUP_HOTKEY_VK   'S'
 #define BACKUP_HOTKEY_TEXT L"Ctrl+Alt+S"
 
-static const wchar_t* APP_NAME = L"SnapShot";
-static const wchar_t* REG_APP  = L"Software\\SnapShot";
-static const wchar_t* REG_RUN  = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+// 顯示用名稱（系統列提示、氣泡、對話框標題）
+#ifdef SMARTSHOT_PRO
+#define APP_TITLE L"SmartShot Pro"
+#else
+#define APP_TITLE L"SmartShot"
+#endif
+
+static const wchar_t* APP_NAME  = L"SmartShot";            // 開機自啟的值名稱
+static const wchar_t* REG_APP   = L"Software\\SmartShot";
+static const wchar_t* REG_RUN   = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+static const wchar_t* WND_CLASS = L"SmartShotWndClass";
+static const wchar_t* AUTOSTART_ARG = L"/autostart";        // 開機自啟時帶的參數
+
+// v1 的舊名稱 SnapShot：啟動時搬移設定與開機自啟
+static const wchar_t* OLD_APP_NAME = L"SnapShot";
+static const wchar_t* OLD_REG_APP  = L"Software\\SnapShot";
+static const wchar_t* OLD_MUTEX    = L"SnapShot_SingleInstance";
 
 static NOTIFYICONDATAW g_nid = {};
 static HWND         g_hwnd   = NULL;
@@ -100,11 +117,11 @@ static void EnableDpiAwareness() {
 }
 
 // ---- 儲存資料夾（登錄檔記憶） -----------------------------
-static std::wstring PicturesDir() {
+static std::wstring PicturesDir(const wchar_t* sub = L"SmartShot") {
     wchar_t p[MAX_PATH];
     if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_MYPICTURES, NULL, 0, p)))
-        return std::wstring(p) + L"\\SnapShot";
-    return L"C:\\SnapShot";
+        return std::wstring(p) + L"\\" + sub;
+    return std::wstring(L"C:\\") + sub;
 }
 
 static std::wstring LoadSaveDir() {
@@ -184,7 +201,8 @@ static void SetAutoStart(bool on) {
         if (on) {
             wchar_t exe[MAX_PATH];
             GetModuleFileNameW(NULL, exe, MAX_PATH);
-            std::wstring q = L"\"" + std::wstring(exe) + L"\"";
+            // 帶參數讓程式分得出是開機自啟，開機時就不跳「已在背景執行」
+            std::wstring q = L"\"" + std::wstring(exe) + L"\" " + AUTOSTART_ARG;
             RegSetValueExW(hKey, APP_NAME, 0, REG_SZ,
                            (const BYTE*)q.c_str(),
                            (DWORD)((q.size() + 1) * sizeof(wchar_t)));
@@ -193,6 +211,48 @@ static void SetAutoStart(bool on) {
         }
         RegCloseKey(hKey);
     }
+}
+
+// ---- 從舊名稱 SnapShot 搬移 -------------------------------
+static void MigrateFromSnapShot() {
+    // 設定：新的登錄檔機碼還不存在時，整個複製舊機碼（舊機碼保留，回頭用舊版也不受影響）
+    HKEY hNew;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_APP, 0, KEY_READ, &hNew) == ERROR_SUCCESS) {
+        RegCloseKey(hNew);
+    } else {
+        HKEY hOld;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, OLD_REG_APP, 0, KEY_READ, &hOld) == ERROR_SUCCESS) {
+            if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_APP, 0, NULL, 0,
+                                KEY_ALL_ACCESS, NULL, &hNew, NULL) == ERROR_SUCCESS) {
+                RegCopyTreeW(hOld, NULL, hNew);
+                RegCloseKey(hNew);
+            }
+            RegCloseKey(hOld);
+        }
+        // 從沒選過資料夾、舊的預設資料夾「圖片\SnapShot」已經存在：繼續存那裡，免得截圖分散兩處
+        std::wstring oldDefault = PicturesDir(L"SnapShot");
+        if (LoadSaveDir() == PicturesDir() &&
+            GetFileAttributesW(oldDefault.c_str()) != INVALID_FILE_ATTRIBUTES)
+            SaveSaveDir(oldDefault);
+    }
+
+    // 開機自啟：舊的「SnapShot」項目改成新名稱，並指向目前這個 exe
+    HKEY hRun;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_RUN, 0, KEY_QUERY_VALUE | KEY_SET_VALUE,
+                      &hRun) == ERROR_SUCCESS) {
+        bool hadOld = RegQueryValueExW(hRun, OLD_APP_NAME, NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
+        if (hadOld) RegDeleteValueW(hRun, OLD_APP_NAME);
+        RegCloseKey(hRun);
+        if (hadOld) SetAutoStart(true);
+    }
+}
+
+// 舊版 SnapShot 正在執行（會跟本程式搶 PrtSc）
+static bool IsOldVersionRunning() {
+    HANDLE h = OpenMutexW(SYNCHRONIZE, FALSE, OLD_MUTEX);
+    if (!h) return false;
+    CloseHandle(h);
+    return true;
 }
 
 // ---- 系統列氣泡通知（截圖成功時不使用） -------------------
@@ -271,17 +331,26 @@ static bool IsUnderOneDrive(const std::wstring& path) {
 }
 
 // ---- 首次提示氣泡：確認熱鍵有效、聽得到快門聲、告知存檔位置 --
-static void MaybeShowFirstRunTip() {
-    if (IsFirstRunDone() || !CanShowPopup()) return;   // 無法顯示就等下次啟動
+// 回傳是否有顯示
+static bool MaybeShowFirstRunTip() {
+    if (IsFirstRunDone() || !CanShowPopup()) return false;   // 無法顯示就等下次啟動
 
     std::wstring msg =
         L"按一下 PrtSc 試試看，聽到快門聲就完成設定。\n"
         L"備援熱鍵：" BACKUP_HOTKEY_TEXT L"\n存檔位置：" + g_saveDir;
     if (IsUnderOneDrive(g_saveDir))
         msg += L"\n此資料夾會同步到 OneDrive，可從右鍵選單更改。";
-    Notify(L"SnapShot 已在背景執行", msg.c_str());
+    Notify(APP_TITLE L" 已在背景執行", msg.c_str());
 
     SetFirstRunDone();
+    return true;
+}
+
+// ---- 手動開啟時的提示（程式沒有視窗，不提示會以為沒打開） --
+static void ShowRunningNotice(bool alreadyRunning) {
+    if (!CanShowPopup()) return;
+    Notify(alreadyRunning ? APP_TITLE L" 已經在執行中" : APP_TITLE L" 已在背景執行",
+           L"按 PrtSc 或 " BACKUP_HOTKEY_TEXT L" 截圖，右鍵點這個圖示可以調整設定。");
 }
 
 // ---- 熱鍵：註冊失敗時引導，並每秒自動重試 -----------------
@@ -342,7 +411,14 @@ static void ShowPrtScGuide(bool snipping) {
           L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
           BACKUP_HOTKEY_TEXT L" 截圖。\n\n"
           L"要打開 Windows 鍵盤設定看看嗎？";
-    int r = MessageBoxW(g_hwnd, msg, L"SnapShot", MB_YESNO | MB_ICONINFORMATION);
+    if (!snipping && IsOldVersionRunning()) {
+        MessageBoxW(g_hwnd,
+            L"舊版的一鍵截圖 SnapShot 正在執行，佔用了 Print Screen 鍵。\n\n"
+            L"請在系統列對舊版圖示按右鍵 →「結束」。結束後立即生效，不用重開本程式。",
+            APP_TITLE, MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    int r = MessageBoxW(g_hwnd, msg, APP_TITLE, MB_YESNO | MB_ICONINFORMATION);
     if (r == IDYES) {
         ShellExecuteW(NULL, L"open", KeyboardSettingsUri(), NULL, NULL, SW_SHOWNORMAL);
     }
@@ -536,6 +612,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return 0;
 
+    case WM_ALREADYRUNNING:
+        ShowRunningNotice(true);
+        return 0;
+
     case WM_SAVEFAILED:
         PlayError();
         if (CanShowPopup()) {
@@ -568,10 +648,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 // ---- 進入點 -----------------------------------------------
-int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
-    // 單一執行個體
-    HANDLE mtx = CreateMutexW(NULL, TRUE, L"SnapShot_SingleInstance");
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR cmdLine, int) {
+    const bool autostart = cmdLine && wcsstr(cmdLine, AUTOSTART_ARG) != NULL;
+
+    // 單一執行個體（免費版與 Pro 共用）
+    HANDLE mtx = CreateMutexW(NULL, TRUE, L"SmartShot_SingleInstance");
     if (mtx && GetLastError() == ERROR_ALREADY_EXISTS) {
+        // 手動再開一次：請已在執行的那個跳提示，免得以為沒反應
+        if (!autostart) {
+            HWND other = FindWindowW(WND_CLASS, NULL);
+            if (other) PostMessageW(other, WM_ALREADYRUNNING, 0, 0);
+        }
         return 0;
     }
 
@@ -581,6 +668,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     GdiplusStartupInput gsi;
     GdiplusStartup(&g_gdiTok, &gsi, NULL);
 
+    MigrateFromSnapShot();
     g_saveDir = LoadSaveDir();
 
     // 隱形視窗（承載熱鍵與系統列訊息）。
@@ -588,15 +676,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     WNDCLASSW wc = {};
     wc.lpfnWndProc   = WndProc;
     wc.hInstance     = hInst;
-    wc.lpszClassName = L"SnapShotWndClass";
+    wc.lpszClassName = WND_CLASS;
     RegisterClassW(&wc);
-    g_hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, L"SnapShot",
+    g_hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, wc.lpszClassName, APP_TITLE,
                              WS_POPUP, 0, 0, 0, 0,
                              NULL, NULL, hInst, NULL);
 
     g_wmTaskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
-    // 以系統管理員身分執行時，仍要收得到 Explorer 送來的 TaskbarCreated
+    // 以系統管理員身分執行時，仍要收得到 Explorer 的 TaskbarCreated 與第二個執行個體的通知
     ChangeWindowMessageFilterEx(g_hwnd, g_wmTaskbarCreated, MSGFLT_ALLOW, NULL);
+    ChangeWindowMessageFilterEx(g_hwnd, WM_ALREADYRUNNING, MSGFLT_ALLOW, NULL);
 
     SaverStart(g_hwnd, WM_SAVEFAILED);
 
@@ -606,8 +695,10 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     g_nid.uID              = 1;
     g_nid.uFlags           = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAYICON;
-    g_nid.hIcon            = LoadIcon(NULL, IDI_APPLICATION);
-    lstrcpynW(g_nid.szTip, L"一鍵截圖 SnapShot（PrtSc／" BACKUP_HOTKEY_TEXT L"）",
+    g_nid.hIcon            = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON,
+                                               GetSystemMetrics(SM_CXSMICON),
+                                               GetSystemMetrics(SM_CYSMICON), 0);
+    lstrcpynW(g_nid.szTip, APP_TITLE L"（PrtSc／" BACKUP_HOTKEY_TEXT L"）",
               ARRAYSIZE(g_nid.szTip));
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
@@ -617,10 +708,13 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     g_prtscReady = IsPrtScReady();
     if (!allRegistered || !g_prtscReady)
         SetTimer(g_hwnd, ID_TIMER_RETRY, 1000, NULL);
-    if (g_prtscReady)
-        MaybeShowFirstRunTip();
-    else if (CanShowPopup())
+    if (g_prtscReady) {
+        // 第一次執行看首次提示；之後手動開啟才提示，開機自啟不打擾
+        if (!MaybeShowFirstRunTip() && !autostart)
+            ShowRunningNotice(false);
+    } else if (CanShowPopup()) {
         ShowPrtScGuide(IsPrtScUsedBySnipping());
+    }
 
     MSG m;
     while (GetMessageW(&m, NULL, 0, 0)) {
@@ -629,6 +723,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     }
 
     SaverStop();            // 等排隊中的截圖存完
+    if (g_nid.hIcon) DestroyIcon(g_nid.hIcon);
     GdiplusShutdown(g_gdiTok);
     OleUninitialize();
     if (mtx) CloseHandle(mtx);

@@ -82,6 +82,7 @@ static std::wstring g_saveDir;
 static UINT         g_wmTaskbarCreated = 0;   // Explorer 重啟後要重新加入系統列圖示
 static bool         g_prtscOk  = false;       // PrtSc 熱鍵已註冊
 static bool         g_backupOk = false;       // 備援熱鍵已註冊
+static bool         g_prtscReady = false;     // PrtSc 真的能用（已註冊且沒被剪取工具攔走）
 
 // ---- 高 DPI：per-monitor v2（動態載入，舊系統自動退回） ----
 static void EnableDpiAwareness() {
@@ -279,16 +280,35 @@ static bool TryRegisterHotkeys() {
     return g_prtscOk && g_backupOk;
 }
 
-static void ShowPrtScGuide() {
-    int r = MessageBoxW(g_hwnd,
-        L"Print Screen 鍵被其他程式佔用了。\n\n"
-        L"最常見的是 Windows 11 剪取工具。要現在打開設定，"
-        L"把「使用 Print Screen 鍵開啟螢幕擷取」關掉嗎？\n\n"
-        L"如果不是剪取工具，可能是 OneDrive、Dropbox 或其他截圖軟體的截圖功能，"
-        L"請先關閉該功能。\n\n"
-        L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
-        BACKUP_HOTKEY_TEXT L" 截圖。",
-        L"SnapShot", MB_YESNO | MB_ICONINFORMATION);
+// ---- Win11 剪取工具是否佔用 PrtSc --------------------------
+// 實測（Win11 25H2）：這個設定開著時 RegisterHotKey 仍會成功，但按鍵被系統先攔走，
+// 程式收不到 WM_HOTKEY。只能讀設定值判斷（開＝1，見登錄檔 Control Panel\Keyboard）。
+static bool IsPrtScUsedBySnipping() {
+    DWORD v = 0, sz = sizeof(v);
+    return RegGetValueW(HKEY_CURRENT_USER, L"Control Panel\\Keyboard",
+                        L"PrintScreenKeyForSnippingEnabled", RRF_RT_REG_DWORD,
+                        NULL, &v, &sz) == ERROR_SUCCESS && v == 1;
+}
+
+// PrtSc 真的能用：熱鍵已註冊，且沒有被剪取工具攔走
+static bool IsPrtScReady() {
+    return g_prtscOk && !IsPrtScUsedBySnipping();
+}
+
+static void ShowPrtScGuide(bool snipping) {
+    const wchar_t* msg = snipping
+        ? L"Print Screen 鍵目前被 Windows 剪取工具使用。\n\n"
+          L"要現在打開設定，把「使用 Print Screen 鍵開啟螢幕擷取」關掉嗎？"
+          L"關掉後剪取工具仍可用 Win+Shift+S 開啟。\n\n"
+          L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
+          BACKUP_HOTKEY_TEXT L" 截圖。"
+        : L"Print Screen 鍵被其他程式佔用了。\n\n"
+          L"可能是 OneDrive、Dropbox 或其他截圖軟體（ShareX、Greenshot 等）的截圖功能，"
+          L"請先關閉該功能。\n\n"
+          L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
+          BACKUP_HOTKEY_TEXT L" 截圖。\n\n"
+          L"要打開 Windows 鍵盤設定看看嗎？";
+    int r = MessageBoxW(g_hwnd, msg, L"SnapShot", MB_YESNO | MB_ICONINFORMATION);
     if (r == IDYES) {
         ShellExecuteW(NULL, L"open", L"ms-settings:easeofaccess-keyboard",
                       NULL, NULL, SW_SHOWNORMAL);
@@ -461,13 +481,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_TIMER:
         if (wp == ID_TIMER_RETRY) {
-            bool hadPrtSc = g_prtscOk;
-            if (TryRegisterHotkeys())
+            bool allRegistered = TryRegisterHotkeys();
+            bool ready = IsPrtScReady();
+            if (allRegistered && ready)
                 KillTimer(hwnd, ID_TIMER_RETRY);
-            if (!hadPrtSc && g_prtscOk) {
+            if (ready && !g_prtscReady) {
                 PlayShutter();        // 用快門聲告訴使用者「可以用了」
                 MaybeShowFirstRunTip();
             }
+            g_prtscReady = ready;
         }
         return 0;
 
@@ -545,14 +567,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
               ARRAYSIZE(g_nid.szTip));
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
-    // 全域快捷鍵：PrtSc＋備援熱鍵。失敗就每秒自動重試；PrtSc 失敗另外引導。
+    // 全域快捷鍵：PrtSc＋備援熱鍵。註冊失敗或 PrtSc 被剪取工具攔走時，引導並每秒重新檢查。
     // 先啟動計時器：引導視窗開著時（MessageBox 仍會處理訊息）就能偵測到使用者關掉設定。
-    if (!TryRegisterHotkeys())
+    bool allRegistered = TryRegisterHotkeys();
+    g_prtscReady = IsPrtScReady();
+    if (!allRegistered || !g_prtscReady)
         SetTimer(g_hwnd, ID_TIMER_RETRY, 1000, NULL);
-    if (g_prtscOk)
+    if (g_prtscReady)
         MaybeShowFirstRunTip();
     else if (CanShowPopup())
-        ShowPrtScGuide();
+        ShowPrtScGuide(IsPrtScUsedBySnipping());
 
     MSG m;
     while (GetMessageW(&m, NULL, 0, 0)) {

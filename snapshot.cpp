@@ -65,6 +65,7 @@ using namespace Gdiplus;
 #define IDM_CHOOSEDIR   1003
 #define IDM_AUTOSTART   1004
 #define IDM_EXIT        1005
+#define IDM_SHUTTER     1006
 
 // ---- 固定備援熱鍵（PrtSc 被佔用或被遊戲攔走時使用） -------
 #define BACKUP_HOTKEY_MOD  (MOD_CONTROL | MOD_ALT)
@@ -130,26 +131,39 @@ static void SaveSaveDir(const std::wstring& dir) {
     }
 }
 
-// ---- 首次執行標記（登錄檔 FirstRunDone = 1） --------------
-static bool IsFirstRunDone() {
+// ---- 其他設定（登錄檔 DWORD） -----------------------------
+static DWORD LoadDword(const wchar_t* name, DWORD def) {
     HKEY hKey;
     DWORD v = 0, sz = sizeof(v), type = 0;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_APP, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        LONG r = RegQueryValueExW(hKey, L"FirstRunDone", NULL, &type, (LPBYTE)&v, &sz);
+        LONG r = RegQueryValueExW(hKey, name, NULL, &type, (LPBYTE)&v, &sz);
         RegCloseKey(hKey);
-        return r == ERROR_SUCCESS && type == REG_DWORD && v == 1;
+        if (r == ERROR_SUCCESS && type == REG_DWORD)
+            return v;
     }
-    return false;
+    return def;
 }
 
-static void SetFirstRunDone() {
+static void SaveDword(const wchar_t* name, DWORD v) {
     HKEY hKey;
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_APP, 0, NULL, 0,
                         KEY_SET_VALUE, NULL, &hKey, NULL) == ERROR_SUCCESS) {
-        DWORD v = 1;
-        RegSetValueExW(hKey, L"FirstRunDone", 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
+        RegSetValueExW(hKey, name, 0, REG_DWORD, (const BYTE*)&v, sizeof(v));
         RegCloseKey(hKey);
     }
+}
+
+// 首次執行標記（FirstRunDone = 1）
+static bool IsFirstRunDone()  { return LoadDword(L"FirstRunDone", 0) == 1; }
+static void SetFirstRunDone() { SaveDword(L"FirstRunDone", 1); }
+
+// 截圖成功的快門聲開關（ShutterSound，預設開）。只管截圖成功那一聲，
+// 錯誤音、警告音、PrtSc 恢復可用時的提示音都不受影響。
+static bool IsShutterOn()       { return LoadDword(L"ShutterSound", 1) != 0; }
+static void SetShutterOn(bool on) { SaveDword(L"ShutterSound", on ? 1 : 0); }
+
+static void PlayCaptureShutter() {
+    if (IsShutterOn()) PlayShutter();
 }
 
 // ---- 開機自啟 ---------------------------------------------
@@ -197,7 +211,7 @@ enum class CaptureMode { GDI, DXGI };
 static CaptureMode g_mode = CaptureMode::GDI;   // 每次啟動都從 GDI 開始，不存檔
 
 static void Finish(Frame& f, bool ok) {
-    if (ok) PlayShutter(); else PlayError();
+    if (ok) PlayCaptureShutter(); else PlayError();
     // 全黑也照樣存，避免漏掉真的黑幕畫面
     if (!f.empty()) EnqueueSave(std::move(f), g_saveDir);
 }
@@ -235,7 +249,7 @@ static void OnHotkey() {
     } else if (IsExclusiveFullscreen()) {
         PlayWarning();   // 可能截到桌面而非遊戲；可作為升級 Pro 的提示點
     } else {
-        PlayShutter();
+        PlayCaptureShutter();
     }
     // 全黑也照樣存，避免漏掉真的黑幕畫面
     if (!f.empty()) EnqueueSave(std::move(f), g_saveDir);
@@ -447,11 +461,13 @@ static void ShowMenu() {
     AppendMenuW(m, MF_STRING, IDM_CHOOSEDIR, L"選擇儲存資料夾…");
     AppendMenuW(m, MF_STRING | (IsAutoStart() ? MF_CHECKED : 0),
                 IDM_AUTOSTART, L"開機時自動啟動");
+    AppendMenuW(m, MF_STRING | (IsShutterOn() ? MF_CHECKED : 0),
+                IDM_SHUTTER, L"截圖快門聲");
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
     AppendMenuW(m, MF_STRING, IDM_EXIT, L"結束");
 
     // 選項前加小圖示（選單不會擁有點陣圖，關閉後要自己刪）。
-    // 「開機時自動啟動」不加：有圖示時 Win11 不畫勾勾，會看不出是否已開啟。
+    // 開關類（開機自啟、快門聲）不加：有圖示時 Win11 不畫勾勾，會看不出是否已開啟。
     const struct { UINT id; wchar_t glyph; } icons[] = {
         { IDM_OPENDIR,   0xE838 },   // 打開的資料夾
         { IDM_CHOOSEDIR, 0xE8DE },   // 資料夾＋箭頭
@@ -535,6 +551,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case IDM_CHOOSEDIR: ChooseDir(); break;
         case IDM_AUTOSTART: SetAutoStart(!IsAutoStart()); break;
+        case IDM_SHUTTER:   SetShutterOn(!IsShutterOn()); break;
         case IDM_EXIT:      DestroyWindow(hwnd); break;
         }
         return 0;

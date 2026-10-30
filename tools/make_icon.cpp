@@ -3,6 +3,7 @@
 //  設計：綠色漸層圓角方塊＋雙山（前白後淡綠）＋黃色太陽
 //  編譯：g++ -municode -O2 -o make_icon.exe make_icon.cpp -static -lgdiplus -lole32
 //  用法：make_icon.exe <輸出 .ico> [預覽 .png]
+//        make_icon.exe --cover <輸出 .png>   itch.io 封面（630x500）
 // ============================================================
 #include <windows.h>
 #include <objidl.h>
@@ -176,16 +177,60 @@ static void WritePreview(const wchar_t* path) {
     sheet.Save(path, &png, NULL);
 }
 
+// itch.io 封面：深綠底＋程式圖示＋名稱與標語。縮成 315x250 的縮圖時文字也要看得清楚。
+static bool WriteCover(const wchar_t* path) {
+    const int W = 630, H = 500;
+    Bitmap cover(W, H, PixelFormat32bppARGB);
+    Graphics g(&cover);
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+
+    LinearGradientBrush bg(PointF(0, 0), PointF((REAL)W, (REAL)H),
+                           Color(255, 15, 36, 27),      // #0F241B
+                           Color(255, 20, 64, 44));     // #14402C
+    g.FillRectangle(&bg, 0, 0, W, H);
+
+    // 圖示：另外畫好再貼上（Draw 會 Clear 整張畫布，不能直接畫在封面上）
+    const int S = 200;
+    std::vector<BYTE> px = Render(S);
+    Bitmap icon(S, S, S * 4, PixelFormat32bppARGB, px.data());
+    g.DrawImage(&icon, (W - S) / 2, 52, S, S);
+
+    StringFormat center;
+    center.SetAlignment(StringAlignmentCenter);
+    FontFamily latin(L"Segoe UI"), cjk(L"Microsoft JhengHei");
+    Font title(&latin, 64, FontStyleBold, UnitPixel);
+    Font sub(&latin, 26, FontStyleRegular, UnitPixel);
+    Font subZh(&cjk, 26, FontStyleBold, UnitPixel);
+    SolidBrush white(Color(255, 255, 255, 255));
+    SolidBrush yellow(Color(255, 250, 204, 21));         // 與圖示的太陽同色
+    SolidBrush soft(Color(255, 187, 247, 208));          // 與後山同色
+    g.DrawString(L"SmartShot", -1, &title, RectF(0, 270, (REAL)W, 80), &center, &white);
+    g.DrawString(L"One-key screenshots for games", -1, &sub, RectF(0, 352, (REAL)W, 40), &center, &yellow);
+    g.DrawString(L"遊戲一鍵截圖・按 PrtSc 就好", -1, &subZh, RectF(0, 396, (REAL)W, 40), &center, &soft);
+
+    CLSID png;
+    GetPngClsid(&png);
+    return cover.Save(path, &png, NULL) == Ok;
+}
+
 int wmain(int argc, wchar_t** argv) {
-    if (argc < 2) {
-        fwprintf(stderr, L"用法：make_icon.exe <輸出 .ico> [預覽 .png]\n");
+    const bool coverMode = argc >= 2 && wcscmp(argv[1], L"--cover") == 0;
+    if (argc < 2 || (coverMode && argc < 3)) {
+        fwprintf(stderr, L"用法：make_icon.exe <輸出 .ico> [預覽 .png]\n"
+                         L"      make_icon.exe --cover <輸出 .png>\n");
         return 1;
     }
     GdiplusStartupInput gsi;
     ULONG_PTR tok;
     GdiplusStartup(&tok, &gsi, NULL);
-    bool ok = WriteIco(argv[1]);
-    if (ok && argc >= 3) WritePreview(argv[2]);
+    bool ok;
+    if (coverMode) {
+        ok = WriteCover(argv[2]);
+    } else {
+        ok = WriteIco(argv[1]);
+        if (ok && argc >= 3) WritePreview(argv[2]);
+    }
     GdiplusShutdown(tok);
     return ok ? 0 : 1;
 }

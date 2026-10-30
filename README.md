@@ -1,81 +1,130 @@
-# 一鍵截圖 SnapShot（合併版）
+# SmartShot
 
-單一免安裝執行檔,常駐系統列。按 **Print Screen** → 擷取整個桌面(含多螢幕)→ 存成 PNG 到指定資料夾。
+**One-key screenshots for Windows — built for games and fullscreen.**
+**Windows 一鍵截圖，主打遊戲與全螢幕畫面。**
 
-這是把兩個版本各取所長合併的版本:保留了選單內建的「選擇資料夾」對話框與「開機自啟」勾選,同時修掉了幾個穩定性問題。
+[English](#english) ｜ [繁體中文](#繁體中文)
 
----
-
-## 直接使用
-
-雙擊 **`Snap.exe`**(約 210 KB,免安裝、無第三方相依)。啟動後常駐系統列右下角。
-
-| 操作 | 功能 |
-|------|------|
-| **Print Screen** | 全螢幕截圖 |
-| 系統列圖示 **雙擊左鍵** | 全螢幕截圖 |
-| 系統列圖示 **右鍵** | 開啟選單 |
-
-右鍵選單:立即截圖 / 開啟儲存資料夾 / **選擇儲存資料夾…** / **開機時自動啟動**(打勾切換) / 結束。
-
-- 預設存到「圖片\SnapShot」,檔名含時間戳(例 `Snap_20260704_143022.png`)。
-- 選過的資料夾會記住(存於登錄檔 `HKCU\Software\SnapShot`),下次沿用。
-
-## 開機常駐
-
-右鍵選單勾選「開機時自動啟動」即可,寫入目前使用者的登錄檔啟動項(`HKCU\...\Run`),不需管理員權限。取消打勾即移除。
+Download / 下載：**[itch.io](https://jack3651.itch.io/smartshot)** ｜ [GitHub Releases](https://github.com/jack3651/SmartShot/releases)
 
 ---
 
-## 這個合併版做了什麼(對照原始 SnapShot)
+## English
 
-保留原本好用的:**PrtSc 熱鍵、資料夾對話框、開機自啟勾選、登錄檔記憶設定**。
-(依你的要求,**移除了 Ctrl+Shift+F** 這組備援熱鍵,只留 PrtSc。)
+Press **PrtSc** and SmartShot saves a PNG of the screen you're looking at. No windows pop up, no editor opens — you just hear a shutter sound and keep playing.
 
-新增三項穩定性強化:
+### Features
 
-1. **檔名不再覆蓋** —— 原版檔名只到「秒」,同一秒連按兩次 PrtSc 第二張會蓋掉第一張;此版會自動加 `_1`、`_2`…,連拍不掉圖。
-2. **per-monitor DPI v2** —— 原版只設 system-DPI aware,在「4K 150% + 1080p 100%」這種混合 DPI 多螢幕下擷取尺寸可能跑掉;此版抓實際像素更準確(單一 DPI 下兩者相同)。
-3. **PrtSc 註冊失敗會提示** —— 原版忽略註冊結果,PrtSc 被攔時靜默無反應;此版會跳視窗說明原因與修法(見下方限制 1),而且就算 PrtSc 失效,你仍可用選單「立即截圖」或雙擊圖示截圖。
+- **One key, zero interruptions.** A successful screenshot only plays a shutter sound. Nothing steals focus from your game.
+- **Captures the right screen.** Only the monitor with the active window is saved, not your whole multi-monitor desktop.
+- **Backup hotkey `Ctrl+Alt+S`** for when PrtSc is taken by another app or a game.
+- **Doesn't slow your game down.** PNG encoding runs on a low-priority background thread.
+- **Single portable exe** (~360 KB). No installer, no runtime, no network access.
+- **English and Traditional Chinese** interface (follows your Windows language; switch from the tray menu).
 
----
+### Getting started
 
-## 自行編譯
+1. Download and unzip, then double-click `SmartShot.exe`. It lives in the system tray (bottom-right).
+2. Press **PrtSc**. When you hear the shutter, you're all set.
+3. Screenshots are saved to `Pictures\SmartShot` as `SmartShot_YYYYMMDD_HHMMSS.png`.
 
-### MinGW-w64
-雙擊 **`build_mingw.bat`**,或手動:
+Right-click the tray icon for: Open save folder · Choose save folder · Start with Windows · Shutter sound · Language · Exit.
+
+### Windows 11: PrtSc opens the Snipping Tool
+
+By default, Windows 11 uses PrtSc to open the Snipping Tool. SmartShot detects this and offers to open the right Settings page. Turn off **"Use the Print screen key to open screen capture"** (Settings → Bluetooth & devices → Keyboard, or Accessibility → Keyboard on older builds). It takes effect immediately; no restart needed. Until then, use `Ctrl+Alt+S`.
+
+### Games and fullscreen
+
+- Windowed and **borderless fullscreen** games capture normally.
+- Some **exclusive fullscreen** games may come out black with the free version. You'll hear a warning or error sound instead of the shutter. Switching the game to borderless mode usually fixes it. (The black image is still saved, so you never lose a real black frame.)
+- Games running as administrator may not receive PrtSc. Run SmartShot as administrator too if needed.
+- Some games use PrtSc for their own screenshots (e.g. World of Warcraft). Change the in-game key or use `Ctrl+Alt+S`.
+
+### "Windows protected your PC"
+
+SmartShot isn't digitally signed, so Windows SmartScreen may warn you on first launch. Make sure you downloaded it from the itch.io page or GitHub Releases above, then click **More info → Run anyway**. If your antivirus quarantines it, restore the file and add an exclusion, or build it yourself from source.
+
+### Settings and uninstalling
+
+Settings are stored in the registry at `HKCU\Software\SmartShot`. "Start with Windows" adds an entry under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. To uninstall: untick "Start with Windows", exit SmartShot, delete the exe, and optionally delete the registry key above.
+
+### Privacy
+
+SmartShot has no network code. It never uploads anything; screenshots stay in the folder you choose. (If that folder is synced by OneDrive, OneDrive will sync it. SmartShot tells you when that's the case.)
+
+### Build from source
+
+Requires MinGW-w64 (GCC) or MSVC.
+
 ```
-g++ -municode -finput-charset=UTF-8 -O2 -s -o Snap.exe snapshot.cpp ^
-    -mwindows -static -static-libgcc -static-libstdc++ ^
-    -lgdiplus -lgdi32 -lshell32 -lole32 -luuid -lcomdlg32
+build_mingw.bat      :: MinGW-w64: windres + g++
+build_msvc.bat       :: MSVC: run from a Developer Command Prompt
 ```
-> Releases 頁面附的 `Snap.exe` 就是用這行編出來的,可自行重編比對。
 
-### MSVC(Visual Studio)
-在「Developer Command Prompt for VS」中執行 **`build_msvc.bat`**。`/MT` 靜態連結,產出單一免安裝 exe。
+### License
 
----
+SmartShot is free software under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
-## 已知限制(Windows 本身的天花板,非程式問題)
-
-1. **Windows 11「用 Print Screen 開啟剪取工具」設定**
-   若開著,可能先攔走 PrtSc,導致熱鍵無效(啟動時會跳提示)。
-   關法:**設定 → 協助工具 → 鍵盤 → 關閉「使用 Print Screen 鍵開啟螢幕擷取畫面」**,再重開本程式。
-   (即使不關,你仍可用選單「立即截圖」或雙擊圖示截圖。)
-
-2. **管理員權限(提權)視窗為前景時**
-   因 UIPI 隔離,一般權限的本程式可能收不到 PrtSc。需要的話對 `Snap.exe` 右鍵「以系統管理員身分執行」。
-
-3. **獨佔全螢幕遊戲 / DRM 內容會截黑**
-   目前用 GDI 擷取,對一般桌面與無邊框全螢幕大多沒問題;但少數獨佔全螢幕遊戲、以及 Netflix 等 DRM 內容會截成全黑(DRM 是系統刻意保護,無法也不該繞過)。要穩定截遊戲畫面需改用 Windows.Graphics.Capture / DXGI 後端,可再加。
-
-4. **首次執行的 SmartScreen 提示**
-   此 exe 未簽章,首次執行可能跳「Windows 已保護你的電腦」→ 點「其他資訊 → 仍要執行」。這是所有未簽章程式的正常現象。
-   另外,「螢幕擷取 + 開機自啟持久化」這組合,少數防毒的啟發式引擎可能較敏感;真有疑慮可自行編譯,或不勾選開機自啟。
+**Contributing:** By submitting a pull request, you agree that your contribution is licensed under GPL-3.0 and that the author may also use it under other licenses (including in SmartShot Pro, a paid edition that adds DXGI capture for exclusive fullscreen games).
 
 ---
 
-## 設定儲存方式(可改)
+## 繁體中文
 
-此版設定(資料夾)存在**登錄檔**,好處是搬動 exe 後設定仍在,與「開機自啟」一致;代價是會留登錄檔痕跡。
-若你偏好**零登錄檔足跡的可攜版**(設定寫在 exe 旁的 ini),跟我說一聲即可改。
+按 **PrtSc**，SmartShot 就把你正在看的那個螢幕存成 PNG。不跳視窗、不開編輯器，只會聽到一聲快門，然後繼續玩。
+
+### 特色
+
+- **一鍵、零打擾**：截圖成功只播快門聲，不會搶走遊戲的焦點。
+- **截對螢幕**：只存目前視窗所在的那個螢幕，不會把多螢幕整個桌面拼在一起。
+- **備援熱鍵 `Ctrl+Alt+S`**：PrtSc 被其他程式或遊戲佔用時使用。
+- **不拖慢遊戲**：PNG 編碼交給低優先權的背景執行緒。
+- **單一免安裝 exe**（約 360 KB），不需要安裝任何執行環境，也不連網。
+- **繁體中文與英文介面**（預設跟 Windows 語言，可從系統列選單切換）。
+
+### 開始使用
+
+1. 下載並解壓縮，雙擊 `SmartShot.exe`。程式會常駐在右下角的系統列。
+2. 按一下 **PrtSc**，聽到快門聲就完成設定。
+3. 截圖存在「圖片\SmartShot」，檔名是 `SmartShot_日期_時間.png`。
+
+對系統列圖示按右鍵：開啟儲存資料夾・選擇儲存資料夾・開機時自動啟動・截圖快門聲・語言・結束。
+
+### Windows 11：PrtSc 會開啟剪取工具
+
+Windows 11 預設把 PrtSc 交給剪取工具。SmartShot 偵測到時會詢問是否打開設定頁，請關閉 **「使用 Print Screen 鍵開啟螢幕擷取」**（設定 → 藍牙與裝置 → 鍵盤；較舊的版本在 協助工具 → 鍵盤）。關掉後立即生效，不用重開程式。在那之前可以先用 `Ctrl+Alt+S`。
+
+### 遊戲與全螢幕
+
+- 視窗模式與**無邊框全螢幕**的遊戲可以正常截圖。
+- 部分**獨佔全螢幕**遊戲用免費版可能截到全黑，這時會聽到警告音或錯誤音，而不是快門聲。把遊戲改成無邊框模式通常就能解決。（全黑的圖也會照樣存檔，不會漏掉真正的黑畫面。）
+- 以系統管理員權限執行的遊戲可能收不到 PrtSc，需要時請也用系統管理員身分執行 SmartShot。
+- 有些遊戲自己也用 PrtSc 截圖（例如魔獸世界），請改掉遊戲內的截圖鍵，或改用 `Ctrl+Alt+S`。
+
+### 「Windows 已保護您的電腦」
+
+SmartShot 沒有數位簽章，第一次執行時 Windows SmartScreen 可能會跳出警告。請先確認檔案是從上方的 itch.io 頁面或 GitHub Releases 下載的，再按 **「其他資訊 → 仍要執行」**。如果防毒軟體把檔案隔離了，可以還原並加入排除清單，或自行從原始碼編譯。
+
+### 設定與移除
+
+設定存在登錄檔 `HKCU\Software\SmartShot`；「開機時自動啟動」會在 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 加一筆。移除方式：取消「開機時自動啟動」、結束 SmartShot、刪除 exe，需要的話再刪除上面的登錄檔機碼。
+
+### 隱私
+
+SmartShot 沒有任何連網程式碼，不會上傳任何東西，截圖只會存在你選的資料夾。（如果那個資料夾有 OneDrive 同步，OneDrive 會把它同步上去，SmartShot 會在第一次執行時提醒你。）
+
+### 自行編譯
+
+需要 MinGW-w64（GCC）或 MSVC。
+
+```
+build_mingw.bat      :: MinGW-w64：windres + g++
+build_msvc.bat       :: MSVC：在 Developer Command Prompt 中執行
+```
+
+### 授權
+
+SmartShot 是以 **GNU 通用公共授權條款第 3 版（GPL-3.0）** 釋出的自由軟體，詳見 [LICENSE](LICENSE)。
+
+**貢獻：** 送出 Pull Request 即表示你同意你的貢獻以 GPL-3.0 授權，且作者也可以用其他授權使用它（包括 SmartShot Pro：加入 DXGI 擷取、支援獨佔全螢幕遊戲的付費版）。

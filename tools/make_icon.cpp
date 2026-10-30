@@ -1,13 +1,12 @@
 // ============================================================
 //  產生 SmartShot 程式圖示（smartshot.ico）與預覽圖
-//  設計：藍紫漸層圓角方塊＋白色觀景窗四角框＋中央四芒星
+//  設計：綠色漸層圓角方塊＋雙山（前白後淡綠）＋黃色太陽
 //  編譯：g++ -municode -O2 -o make_icon.exe make_icon.cpp -static -lgdiplus -lole32
 //  用法：make_icon.exe <輸出 .ico> [預覽 .png]
 // ============================================================
 #include <windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
-#include <math.h>
 #include <stdio.h>
 #include <vector>
 
@@ -24,23 +23,12 @@ static void AddRoundRect(GraphicsPath& p, RectF r, REAL rad) {
     p.CloseFigure();
 }
 
-// 四芒星：外圈 4 個尖端、內圈 4 個凹點
-static void AddSparkle(GraphicsPath& p, REAL cx, REAL cy, REAL r, REAL inner) {
-    PointF pts[8];
-    for (int i = 0; i < 8; ++i) {
-        const double a = -M_PI / 2 + i * M_PI / 4;
-        const REAL rr = (i % 2 == 0) ? r : r * inner;
-        pts[i] = PointF(cx + (REAL)(cos(a) * rr), cy + (REAL)(sin(a) * rr));
-    }
-    p.AddPolygon(pts, 8);
-}
-
 static void Draw(Graphics& g, int S) {
     g.SetSmoothingMode(SmoothingModeAntiAlias);
     g.SetPixelOffsetMode(PixelOffsetModeHalf);
     g.Clear(Color(0, 0, 0, 0));
 
-    // 小尺寸時線條相對加粗，避免糊掉
+    // 小尺寸時元素相對加大，避免糊掉
     const bool tiny = S <= 32;
     const REAL margin = S * (tiny ? 0.0f : 0.04f);
     RectF bg(margin, margin, S - 2 * margin, S - 2 * margin);
@@ -48,32 +36,31 @@ static void Draw(Graphics& g, int S) {
     GraphicsPath bgPath;
     AddRoundRect(bgPath, bg, bg.Width * 0.22f);
     LinearGradientBrush grad(PointF(bg.X, bg.Y), PointF(bg.GetRight(), bg.GetBottom()),
-                             Color(255, 59, 130, 246),    // #3B82F6
-                             Color(255, 124, 58, 237));   // #7C3AED
+                             Color(255, 34, 197, 94),     // #22C55E
+                             Color(255, 21, 101, 52));    // #156534
     g.FillPath(&grad, &bgPath);
 
-    // 觀景窗四角框
-    const REAL inset = bg.X + bg.Width * (tiny ? 0.19f : 0.22f);
-    const REAL outer   = bg.GetRight() - (inset - bg.X);
-    const REAL len   = bg.Width * (tiny ? 0.15f : 0.20f);
-    Pen pen(Color(255, 255, 255, 255), bg.Width * (tiny ? 0.10f : 0.075f));
-    pen.SetStartCap(LineCapRound);
-    pen.SetEndCap(LineCapRound);
-    pen.SetLineJoin(LineJoinRound);
-    const PointF corners[4][3] = {
-        { PointF(inset, inset + len), PointF(inset, inset), PointF(inset + len, inset) },
-        { PointF(outer - len, inset),   PointF(outer, inset),   PointF(outer, inset + len) },
-        { PointF(outer, outer - len),     PointF(outer, outer),     PointF(outer - len, outer) },
-        { PointF(inset + len, outer),   PointF(inset, outer),   PointF(inset, outer - len) },
-    };
-    for (const auto& c : corners) g.DrawLines(&pen, c, 3);
+    // 以底色方塊為單位座標（0～1）
+    auto P = [&](REAL x, REAL y) { return PointF(bg.X + bg.Width * x, bg.Y + bg.Height * y); };
 
-    // 中央四芒星
-    GraphicsPath star;
-    const REAL cx = bg.X + bg.Width / 2, cy = bg.Y + bg.Height / 2;
-    AddSparkle(star, cx, cy, bg.Width * (tiny ? 0.21f : 0.18f), tiny ? 0.38f : 0.28f);
+    // 黃色太陽（右上）
+    const REAL sunR = bg.Width * (tiny ? 0.13f : 0.11f);
+    const PointF sun = P(0.74f, tiny ? 0.25f : 0.24f);
+    SolidBrush yellow(Color(255, 250, 204, 21));         // #FACC15
+    g.FillEllipse(&yellow, sun.X - sunR, sun.Y - sunR, sunR * 2, sunR * 2);
+
+    // 雙山：45 度斜邊，山腳留一條綠色地面，淺色工作列上才看得出方塊輪廓；左右超出由圓角裁掉
+    g.SetClip(&bgPath);
     SolidBrush white(Color(255, 255, 255, 255));
-    g.FillPath(&white, &star);
+    const REAL base = tiny ? 0.80f : 0.78f;
+    const REAL bx = 0.72f, by = tiny ? 0.40f : 0.42f;   // 後山山頂
+    const REAL fx = 0.38f, fy = tiny ? 0.26f : 0.30f;   // 前山山頂
+    const PointF back[3]  = { P(bx - (base - by), base), P(bx, by), P(bx + (base - by), base) };
+    const PointF front[3] = { P(fx - (base - fy), base), P(fx, fy), P(fx + (base - fy), base) };
+    SolidBrush pale(Color(255, 187, 247, 208));          // #BBF7D0 後山較淡
+    g.FillPolygon(&pale, back, 3);
+    g.FillPolygon(&white, front, 3);
+    g.ResetClip();
 }
 
 // 取 32bpp straight-alpha BGRA，top-down

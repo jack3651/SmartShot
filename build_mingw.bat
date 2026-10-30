@@ -1,19 +1,23 @@
 @echo off
 REM ============================================================
-REM  用 MinGW-w64 (g++) 編譯 SmartShot
-REM  需先安裝 MinGW-w64（或 MSYS2 的 mingw-w64-x86_64-gcc），
-REM  並把 g++ / windres 所在 bin 資料夾加入 PATH。
-REM  -s 去除除錯符號讓 exe 更小；-static 靜態連結成單一免安裝檔。
+REM  Build SmartShot with MinGW-w64 (g++).
+REM  Requires MinGW-w64 (or mingw-w64-x86_64-gcc from MSYS2) with its bin
+REM  folder (g++, windres) on PATH.
+REM  -s strips symbols for a smaller exe; -static links the runtime in,
+REM  so the result is a single portable exe.
+REM
+REM  Keep this file ASCII-only: cmd mis-tracks its read position in batch files
+REM  that contain non-ASCII text when the code page changes, and runs fragments
+REM  of earlier lines as commands.
 REM ============================================================
-chcp 65001 >nul
-REM 從任何資料夾執行都切到本資料夾（.rc 與原始碼在這裡）
 setlocal
+REM Run from this folder (.rc and sources live here)
 cd /d "%~dp0"
-echo 編譯資源檔（快門音效）...
+echo Compiling resources (icon, sound)...
 windres smartshot.rc -O coff -o smartshot.res
 if errorlevel 1 goto fail
 
-echo 編譯中...
+echo Compiling...
 g++ -municode -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 -finput-charset=UTF-8 -O2 -s -o SmartShot.exe ^
     smartshot.cpp capture_common.cpp capture_gdi.cpp saver.cpp feedback.cpp smartshot.res ^
     -mwindows -static -static-libgcc -static-libstdc++ ^
@@ -21,12 +25,12 @@ g++ -municode -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 -finput-charset=UTF-8 -
 if errorlevel 1 goto fail
 
 echo.
-echo 完成！產生 SmartShot.exe，雙擊即可執行（常駐系統列右下角）。
+echo Build OK  ^-^>  SmartShot.exe (double-click to run; it lives in the tray, bottom right).
 pause
 exit /b 0
 
 :fail
 echo.
-echo 編譯失敗，請確認 g++ 與 windres 已安裝並在 PATH 中。
+echo Build FAILED. Make sure g++ and windres are installed and on PATH.
 pause
 exit /b 1

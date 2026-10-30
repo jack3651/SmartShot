@@ -1,13 +1,17 @@
 @echo off
 REM ============================================================
-REM  用 MSVC 編譯 SmartShot
-REM  請在「Developer Command Prompt for VS」中切到本資料夾執行。
-REM  /MT 靜態連結 C runtime → 單一免安裝 exe，不需安裝任何 runtime。
-REM  /utf-8：原始碼含中文字串，沒有這個旗標會以系統字碼頁讀取而變亂碼。
-REM  相依函式庫由原始碼的 #pragma comment 自動帶入。
+REM  Build SmartShot with MSVC.
+REM  Run from a "Developer Command Prompt for VS".
+REM  /MT links the C runtime statically: a single portable exe, no runtime
+REM  to install.
+REM  /utf-8: the sources contain Chinese strings; without it cl reads them
+REM  in the system code page and they come out garbled.
+REM  Libraries are pulled in by #pragma comment in the sources.
+REM
+REM  Keep this file ASCII-only (see build_mingw.bat).
 REM ============================================================
-REM 從任何資料夾執行都切到本資料夾
 setlocal
+REM Run from this folder, wherever it is called from
 cd /d "%~dp0"
 rc /nologo smartshot.rc
 if errorlevel 1 goto fail

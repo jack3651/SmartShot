@@ -8,6 +8,7 @@
 //    - 存檔資料夾記憶於登錄檔
 //    - 單一免安裝 exe，無第三方相依
 //    - 備援熱鍵 Ctrl+Alt+S
+//    - 介面語言：繁體中文／英文（預設跟系統，可從選單切換）
 //  v2 擷取流程（見《SmartShot 擷取流程規格》）：
 //    - 免費版只用 GDI；Pro 版（SMARTSHOT_PRO）全黑或獨佔全螢幕時改用 DXGI
 //    - 截圖成功只播快門聲，不跳任何視窗；全黑／失敗播錯誤音
@@ -69,6 +70,8 @@ using namespace Gdiplus;
 #define IDM_AUTOSTART   1004
 #define IDM_EXIT        1005
 #define IDM_SHUTTER     1006
+#define IDM_LANG_ZH     1007
+#define IDM_LANG_EN     1008
 
 // ---- 固定備援熱鍵（PrtSc 被佔用或被遊戲攔走時使用） -------
 #define BACKUP_HOTKEY_MOD  (MOD_CONTROL | MOD_ALT)
@@ -98,6 +101,10 @@ static bool         g_prtscOk  = false;       // PrtSc 熱鍵已註冊
 static bool         g_backupOk = false;       // 備援熱鍵已註冊
 static bool         g_prtscReady = false;     // PrtSc 真的能用（已註冊且沒被剪取工具攔走）
 static int          g_reregTicks = 0;         // 剪取工具剛釋放 PrtSc 後，還要重新註冊幾次
+static bool         g_en = false;             // 介面用英文
+
+// 介面字串：依目前語言回傳中文或英文
+static const wchar_t* Tr(const wchar_t* zh, const wchar_t* en) { return g_en ? en : zh; }
 
 // ---- 高 DPI：per-monitor v2（動態載入，舊系統自動退回） ----
 static void EnableDpiAwareness() {
@@ -175,6 +182,17 @@ static void SetFirstRunDone() { SaveDword(L"FirstRunDone", 1); }
 static bool IsShutterOn()       { return LoadDword(L"ShutterSound", 1) != 0; }
 static void SetShutterOn(bool on) { SaveDword(L"ShutterSound", on ? 1 : 0); }
 
+// 介面語言（Language：1＝繁體中文、2＝英文）。沒設定過就跟系統介面語言，中文以外都用英文。
+enum { LANG_SETTING_ZH = 1, LANG_SETTING_EN = 2 };
+
+static bool LoadEnglish() {
+    switch (LoadDword(L"Language", 0)) {
+    case LANG_SETTING_ZH: return false;
+    case LANG_SETTING_EN: return true;
+    }
+    return PRIMARYLANGID(GetUserDefaultUILanguage()) != LANG_CHINESE;
+}
+
 static void PlayCaptureShutter() {
     if (IsShutterOn()) PlayShutter();
 }
@@ -251,12 +269,19 @@ static bool IsOldVersionRunning() {
     return true;
 }
 
+// ---- 系統列滑鼠提示（切換語言時更新） ---------------------
+static void SetTrayTip() {
+    lstrcpynW(g_nid.szTip, Tr(APP_TITLE L"（PrtSc／" BACKUP_HOTKEY_TEXT L"）",
+                              APP_TITLE L" (PrtSc / " BACKUP_HOTKEY_TEXT L")"),
+              ARRAYSIZE(g_nid.szTip));
+}
+
 // ---- 系統列氣泡通知（截圖成功時不使用） -------------------
 static void Notify(const wchar_t* title, const wchar_t* msg) {
     g_nid.uFlags = NIF_INFO;
     lstrcpynW(g_nid.szInfoTitle, title, ARRAYSIZE(g_nid.szInfoTitle));
     lstrcpynW(g_nid.szInfo, msg, ARRAYSIZE(g_nid.szInfo));
-    g_nid.dwInfoFlags = NIIF_INFO;
+    g_nid.dwInfoFlags = g_nid.hBalloonIcon ? (NIIF_USER | NIIF_LARGE_ICON) : NIIF_INFO;
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; // 還原
 }
@@ -331,12 +356,15 @@ static bool IsUnderOneDrive(const std::wstring& path) {
 static bool MaybeShowFirstRunTip() {
     if (IsFirstRunDone() || !CanShowPopup()) return false;   // 無法顯示就等下次啟動
 
-    std::wstring msg =
+    std::wstring msg = std::wstring(Tr(
         L"按一下 PrtSc 試試看，聽到快門聲就完成設定。\n"
-        L"備援熱鍵：" BACKUP_HOTKEY_TEXT L"\n存檔位置：" + g_saveDir;
+        L"備援熱鍵：" BACKUP_HOTKEY_TEXT L"\n存檔位置：",
+        L"Press PrtSc to try it. When you hear the shutter, you're all set.\n"
+        L"Backup hotkey: " BACKUP_HOTKEY_TEXT L"\nSave folder: ")) + g_saveDir;
     if (IsUnderOneDrive(g_saveDir))
-        msg += L"\n此資料夾會同步到 OneDrive，可從右鍵選單更改。";
-    Notify(APP_TITLE L" 已在背景執行", msg.c_str());
+        msg += Tr(L"\n此資料夾會同步到 OneDrive，可從右鍵選單更改。",
+                  L"\nThis folder syncs to OneDrive. You can change it from the right-click menu.");
+    Notify(Tr(APP_TITLE L" 已在背景執行", APP_TITLE L" is running in the background"), msg.c_str());
 
     SetFirstRunDone();
     return true;
@@ -345,8 +373,11 @@ static bool MaybeShowFirstRunTip() {
 // ---- 手動開啟時的提示（程式沒有視窗，不提示會以為沒打開） --
 static void ShowRunningNotice(bool alreadyRunning) {
     if (!CanShowPopup()) return;
-    Notify(alreadyRunning ? APP_TITLE L" 已經在執行中" : APP_TITLE L" 已在背景執行",
-           L"按 PrtSc 或 " BACKUP_HOTKEY_TEXT L" 截圖，右鍵點這個圖示可以調整設定。");
+    Notify(alreadyRunning ? Tr(APP_TITLE L" 已經在執行中", APP_TITLE L" is already running")
+                          : Tr(APP_TITLE L" 已在背景執行", APP_TITLE L" is running in the background"),
+           Tr(L"按 PrtSc 或 " BACKUP_HOTKEY_TEXT L" 截圖，右鍵點這個圖示可以調整設定。",
+              L"Press PrtSc or " BACKUP_HOTKEY_TEXT L" to take a screenshot. "
+              L"Right-click this icon for settings."));
 }
 
 // ---- 熱鍵：註冊失敗時引導，並每秒自動重試 -----------------
@@ -396,21 +427,35 @@ static const wchar_t* KeyboardSettingsUri() {
 
 static void ShowPrtScGuide(bool snipping) {
     const wchar_t* msg = snipping
-        ? L"Print Screen 鍵目前被 Windows 剪取工具使用。\n\n"
-          L"要現在打開設定，把「使用 Print Screen 鍵開啟螢幕擷取」關掉嗎？"
-          L"關掉後剪取工具仍可用 Win+Shift+S 開啟。\n\n"
-          L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
-          BACKUP_HOTKEY_TEXT L" 截圖。"
-        : L"Print Screen 鍵被其他程式佔用了。\n\n"
-          L"可能是 OneDrive、Dropbox 或其他截圖軟體（ShareX、Greenshot 等）的截圖功能，"
-          L"請先關閉該功能。\n\n"
-          L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
-          BACKUP_HOTKEY_TEXT L" 截圖。\n\n"
-          L"要打開 Windows 鍵盤設定看看嗎？";
+        ? Tr(L"Print Screen 鍵目前被 Windows 剪取工具使用。\n\n"
+             L"要現在打開設定，把「使用 Print Screen 鍵開啟螢幕擷取」關掉嗎？"
+             L"關掉後剪取工具仍可用 Win+Shift+S 開啟。\n\n"
+             L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
+             BACKUP_HOTKEY_TEXT L" 截圖。",
+             L"The Print Screen key is currently used by the Windows Snipping Tool.\n\n"
+             L"Open Settings now and turn off \"Use the Print screen key to open screen capture\"? "
+             L"You can still open the Snipping Tool with Win+Shift+S.\n\n"
+             L"The change takes effect immediately, no need to restart SmartShot. "
+             L"Until then, you can take screenshots with " BACKUP_HOTKEY_TEXT L".")
+        : Tr(L"Print Screen 鍵被其他程式佔用了。\n\n"
+             L"可能是 OneDrive、Dropbox 或其他截圖軟體（ShareX、Greenshot 等）的截圖功能，"
+             L"請先關閉該功能。\n\n"
+             L"關掉後立即生效，不用重開本程式。在那之前，可以先用 "
+             BACKUP_HOTKEY_TEXT L" 截圖。\n\n"
+             L"要打開 Windows 鍵盤設定看看嗎？",
+             L"The Print Screen key is being used by another program.\n\n"
+             L"It may be the screenshot feature of OneDrive, Dropbox, or another screenshot tool "
+             L"(ShareX, Greenshot, etc.). Please turn that feature off first.\n\n"
+             L"The change takes effect immediately, no need to restart SmartShot. "
+             L"Until then, you can take screenshots with " BACKUP_HOTKEY_TEXT L".\n\n"
+             L"Open Windows keyboard settings?");
     if (!snipping && IsOldVersionRunning()) {
         MessageBoxW(g_hwnd,
-            L"舊版的一鍵截圖 SnapShot 正在執行，佔用了 Print Screen 鍵。\n\n"
-            L"請在系統列對舊版圖示按右鍵 →「結束」。結束後立即生效，不用重開本程式。",
+            Tr(L"舊版的一鍵截圖 SnapShot 正在執行，佔用了 Print Screen 鍵。\n\n"
+               L"請在系統列對舊版圖示按右鍵 →「結束」。結束後立即生效，不用重開本程式。",
+               L"The old version (SnapShot) is running and is using the Print Screen key.\n\n"
+               L"Right-click its icon in the system tray and choose \"結束\" (Exit). "
+               L"The change takes effect immediately, no need to restart SmartShot."),
             APP_TITLE, MB_OK | MB_ICONINFORMATION);
         return;
     }
@@ -424,7 +469,7 @@ static void ShowPrtScGuide(bool snipping) {
 static void ChooseDir() {
     BROWSEINFOW bi = {};
     bi.hwndOwner = g_hwnd;
-    bi.lpszTitle = L"選擇截圖儲存資料夾";
+    bi.lpszTitle = Tr(L"選擇截圖儲存資料夾", L"Choose a folder for screenshots");
     bi.ulFlags   = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
     LPITEMIDLIST pidl = SHBrowseForFolderW(&bi);
     if (pidl) {
@@ -432,7 +477,7 @@ static void ChooseDir() {
         if (SHGetPathFromIDListW(pidl, path)) {
             g_saveDir = path;
             SaveSaveDir(g_saveDir);
-            Notify(L"已設定儲存資料夾", g_saveDir.c_str());
+            Notify(Tr(L"已設定儲存資料夾", L"Save folder set"), g_saveDir.c_str());
         }
         CoTaskMemFree(pidl);
     }
@@ -529,14 +574,21 @@ static void ShowMenu() {
     GetCursorPos(&pt);
     // 極簡選單：截圖只靠熱鍵（全螢幕遊戲裡點不到選單）
     HMENU m = CreatePopupMenu();
-    AppendMenuW(m, MF_STRING, IDM_OPENDIR,  L"開啟儲存資料夾");
-    AppendMenuW(m, MF_STRING, IDM_CHOOSEDIR, L"選擇儲存資料夾…");
+    AppendMenuW(m, MF_STRING, IDM_OPENDIR,  Tr(L"開啟儲存資料夾", L"Open save folder"));
+    AppendMenuW(m, MF_STRING, IDM_CHOOSEDIR, Tr(L"選擇儲存資料夾…", L"Choose save folder…"));
     AppendMenuW(m, MF_STRING | (IsAutoStart() ? MF_CHECKED : 0),
-                IDM_AUTOSTART, L"開機時自動啟動");
+                IDM_AUTOSTART, Tr(L"開機時自動啟動", L"Start with Windows"));
     AppendMenuW(m, MF_STRING | (IsShutterOn() ? MF_CHECKED : 0),
-                IDM_SHUTTER, L"截圖快門聲");
+                IDM_SHUTTER, Tr(L"截圖快門聲", L"Shutter sound"));
+    // 語言子選單：選項固定用各自的語言顯示，看不懂目前的語言也找得到
+    HMENU lang = CreatePopupMenu();
+    AppendMenuW(lang, MF_STRING, IDM_LANG_ZH, L"繁體中文");
+    AppendMenuW(lang, MF_STRING, IDM_LANG_EN, L"English");
+    CheckMenuRadioItem(lang, IDM_LANG_ZH, IDM_LANG_EN, g_en ? IDM_LANG_EN : IDM_LANG_ZH, MF_BYCOMMAND);
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)lang, Tr(L"語言（Language）", L"Language"));
+    const UINT langPos = GetMenuItemCount(m) - 1;
     AppendMenuW(m, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(m, MF_STRING, IDM_EXIT, L"結束");
+    AppendMenuW(m, MF_STRING, IDM_EXIT, Tr(L"結束", L"Exit"));
 
     // 選項前加小圖示（選單不會擁有點陣圖，關閉後要自己刪）。
     // 開關類（開機自啟、快門聲）不加：有圖示時 Win11 不畫勾勾，會看不出是否已開啟。
@@ -546,26 +598,32 @@ static void ShowMenu() {
         { IDM_EXIT,      0xF3B1 },   // 離開
     };
     HBITMAP bmps[ARRAYSIZE(icons)] = {};
+    HBITMAP langBmp = NULL;
     HDC screen = GetDC(NULL);
     if (const wchar_t* face = IconFontFace(screen)) {
         const int size = MulDiv(16, (int)DpiAtPoint(pt), 96);
+        MENUITEMINFOW mii = {};
+        mii.cbSize = sizeof(mii);
+        mii.fMask  = MIIM_BITMAP;
         for (size_t i = 0; i < ARRAYSIZE(icons); ++i) {
             bmps[i] = MakeGlyphBitmap(screen, face, icons[i].glyph, size, GetSysColor(COLOR_MENUTEXT));
-            MENUITEMINFOW mii = {};
-            mii.cbSize   = sizeof(mii);
-            mii.fMask    = MIIM_BITMAP;
             mii.hbmpItem = bmps[i];
             if (bmps[i]) SetMenuItemInfoW(m, icons[i].id, FALSE, &mii);
         }
+        // 子選單沒有命令 ID，依位置設定（地球）
+        langBmp = MakeGlyphBitmap(screen, face, 0xE774, size, GetSysColor(COLOR_MENUTEXT));
+        mii.hbmpItem = langBmp;
+        if (langBmp) SetMenuItemInfoW(m, langPos, TRUE, &mii);
     }
     ReleaseDC(NULL, screen);
 
     SetForegroundWindow(g_hwnd);
     TrackPopupMenu(m, TPM_RIGHTBUTTON, pt.x, pt.y, 0, g_hwnd, NULL);
     PostMessageW(g_hwnd, WM_NULL, 0, 0);  // MSDN 建議：確保選單正常關閉
-    DestroyMenu(m);
+    DestroyMenu(m);           // 子選單一併刪除
     for (HBITMAP b : bmps)
         if (b) DeleteObject(b);
+    if (langBmp) DeleteObject(langBmp);
 }
 
 // ---- 視窗訊息 ---------------------------------------------
@@ -615,8 +673,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_SAVEFAILED:
         PlayError();
         if (CanShowPopup()) {
-            std::wstring msg = L"無法儲存到：" + g_saveDir;
-            Notify(L"截圖存檔失敗", msg.c_str());
+            std::wstring msg = Tr(L"無法儲存到：", L"Cannot save to: ") + g_saveDir;
+            Notify(Tr(L"截圖存檔失敗", L"Screenshot not saved"), msg.c_str());
         }
         return 0;
 
@@ -628,6 +686,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case IDM_CHOOSEDIR: ChooseDir(); break;
         case IDM_AUTOSTART: SetAutoStart(!IsAutoStart()); break;
         case IDM_SHUTTER:   SetShutterOn(!IsShutterOn()); break;
+        case IDM_LANG_ZH:
+        case IDM_LANG_EN:
+            g_en = LOWORD(wp) == IDM_LANG_EN;
+            SaveDword(L"Language", g_en ? LANG_SETTING_EN : LANG_SETTING_ZH);
+            SetTrayTip();
+            Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+            break;
         case IDM_EXIT:      DestroyWindow(hwnd); break;
         }
         return 0;
@@ -666,6 +731,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR cmdLine, int) {
 
     MigrateFromSnapShot();
     g_saveDir = LoadSaveDir();
+    g_en = LoadEnglish();
 
     // 隱形視窗（承載熱鍵與系統列訊息）。
     // 不用 HWND_MESSAGE：訊息專用視窗收不到 TaskbarCreated 廣播。
@@ -694,8 +760,11 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR cmdLine, int) {
     g_nid.hIcon            = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON,
                                                GetSystemMetrics(SM_CXSMICON),
                                                GetSystemMetrics(SM_CYSMICON), 0);
-    lstrcpynW(g_nid.szTip, APP_TITLE L"（PrtSc／" BACKUP_HOTKEY_TEXT L"）",
-              ARRAYSIZE(g_nid.szTip));
+    // 通知內文的大圖示用程式圖示，不用系統的「i」
+    g_nid.hBalloonIcon     = (HICON)LoadImageW(hInst, MAKEINTRESOURCEW(IDI_APP), IMAGE_ICON,
+                                               GetSystemMetrics(SM_CXICON),
+                                               GetSystemMetrics(SM_CYICON), 0);
+    SetTrayTip();
     Shell_NotifyIconW(NIM_ADD, &g_nid);
 
     // 全域快捷鍵：PrtSc＋備援熱鍵。註冊失敗或 PrtSc 被剪取工具攔走時，引導並每秒重新檢查。
@@ -720,6 +789,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR cmdLine, int) {
 
     SaverStop();            // 等排隊中的截圖存完
     if (g_nid.hIcon) DestroyIcon(g_nid.hIcon);
+    if (g_nid.hBalloonIcon) DestroyIcon(g_nid.hBalloonIcon);
     GdiplusShutdown(g_gdiTok);
     OleUninitialize();
     if (mtx) CloseHandle(mtx);

@@ -200,14 +200,14 @@ static bool WriteCover(const wchar_t* path) {
     center.SetAlignment(StringAlignmentCenter);
     FontFamily latin(L"Segoe UI"), cjk(L"Microsoft JhengHei");
     Font title(&latin, 64, FontStyleBold, UnitPixel);
-    Font sub(&latin, 26, FontStyleRegular, UnitPixel);
+    Font sub(&latin, 23, FontStyleRegular, UnitPixel);
     Font subZh(&cjk, 26, FontStyleBold, UnitPixel);
     SolidBrush white(Color(255, 255, 255, 255));
     SolidBrush yellow(Color(255, 250, 204, 21));         // 與圖示的太陽同色
     SolidBrush soft(Color(255, 187, 247, 208));          // 與後山同色
     g.DrawString(L"SmartShot", -1, &title, RectF(0, 270, (REAL)W, 80), &center, &white);
-    g.DrawString(L"One-key screenshots for games", -1, &sub, RectF(0, 352, (REAL)W, 40), &center, &yellow);
-    g.DrawString(L"遊戲一鍵截圖・按 PrtSc 就好", -1, &subZh, RectF(0, 396, (REAL)W, 40), &center, &soft);
+    g.DrawString(L"One-key screenshots for your desktop and games", -1, &sub, RectF(0, 352, (REAL)W, 40), &center, &yellow);
+    g.DrawString(L"桌面與遊戲一鍵截圖・按 PrtSc 就好", -1, &subZh, RectF(0, 396, (REAL)W, 40), &center, &soft);
 
     CLSID png;
     GetPngClsid(&png);

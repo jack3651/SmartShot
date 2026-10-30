@@ -6,6 +6,9 @@ REM  並把 g++ / windres 所在 bin 資料夾加入 PATH。
 REM  -s 去除除錯符號讓 exe 更小；-static 靜態連結成單一免安裝檔。
 REM ============================================================
 chcp 65001 >nul
+REM 從任何資料夾執行都切到本資料夾（.rc 與原始碼在這裡）
+setlocal
+cd /d "%~dp0"
 echo 編譯資源檔（快門音效）...
 windres smartshot.rc -O coff -o smartshot.res
 if errorlevel 1 goto fail

@@ -64,6 +64,7 @@ using namespace Gdiplus;
 #define WM_ALREADYRUNNING (WM_APP + 3)   // 第二個執行個體通知已在執行的那個
 #define ID_HOTKEY_PRTSC  1
 #define ID_TIMER_RETRY   2
+#define ID_TIMER_TRAY    4   // 系統列圖示加入失敗時重試
 #define ID_HOTKEY_BACKUP 3
 #define IDM_OPENDIR     1002
 #define IDM_CHOOSEDIR   1003
@@ -129,8 +130,8 @@ static std::wstring PicturesDir(const wchar_t* sub = L"SmartShot") {
 
 static std::wstring LoadSaveDir() {
     HKEY hKey;
-    wchar_t buf[MAX_PATH];
-    DWORD sz = sizeof(buf), type = 0;
+    wchar_t buf[MAX_PATH + 1] = {};   // 多留一格：登錄檔字串不一定有結尾的 0
+    DWORD sz = MAX_PATH * sizeof(wchar_t), type = 0;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_APP, 0, KEY_READ, &hKey) == ERROR_SUCCESS) {
         LONG r = RegQueryValueExW(hKey, L"SaveDir", NULL, &type, (LPBYTE)buf, &sz);
         RegCloseKey(hKey);
@@ -276,14 +277,28 @@ static void SetTrayTip() {
               ARRAYSIZE(g_nid.szTip));
 }
 
+// ---- 加入系統列圖示 ---------------------------------------
+// 開機自啟時系統列可能還沒準備好，NIM_ADD 會失敗，而且之後不一定收得到 TaskbarCreated，
+// 所以失敗就每 2 秒重試。NIM_ADD 逾時也會回報失敗但圖示其實已加上，重試時先用 NIM_MODIFY 確認。
+static bool AddTrayIcon() {
+    if (Shell_NotifyIconW(NIM_MODIFY, &g_nid) || Shell_NotifyIconW(NIM_ADD, &g_nid)) {
+        KillTimer(g_hwnd, ID_TIMER_TRAY);
+        return true;
+    }
+    SetTimer(g_hwnd, ID_TIMER_TRAY, 2000, NULL);
+    return false;
+}
+
 // ---- 系統列氣泡通知（截圖成功時不使用） -------------------
-static void Notify(const wchar_t* title, const wchar_t* msg) {
+// 回傳是否有送出（系統列圖示還沒加上時會失敗）
+static bool Notify(const wchar_t* title, const wchar_t* msg) {
     g_nid.uFlags = NIF_INFO;
     lstrcpynW(g_nid.szInfoTitle, title, ARRAYSIZE(g_nid.szInfoTitle));
     lstrcpynW(g_nid.szInfo, msg, ARRAYSIZE(g_nid.szInfo));
     g_nid.dwInfoFlags = g_nid.hBalloonIcon ? (NIIF_USER | NIIF_LARGE_ICON) : NIIF_INFO;
-    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    const bool ok = Shell_NotifyIconW(NIM_MODIFY, &g_nid) != FALSE;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; // 還原
+    return ok;
 }
 
 // ---- 熱鍵：擷取 → 全黑掃描 → 播放聲音 → 排入存檔 ---------
@@ -359,12 +374,16 @@ static bool MaybeShowFirstRunTip() {
     std::wstring msg = std::wstring(Tr(
         L"按一下 PrtSc 試試看，聽到快門聲就完成設定。\n"
         L"備援熱鍵：" BACKUP_HOTKEY_TEXT L"\n存檔位置：",
-        L"Press PrtSc to try it. When you hear the shutter, you're all set.\n"
-        L"Backup hotkey: " BACKUP_HOTKEY_TEXT L"\nSave folder: ")) + g_saveDir;
+        // 英文較長，通知內文上限 255 字，要留空間給存檔路徑
+        L"Press PrtSc to test. A shutter sound means it works.\n"
+        L"Backup hotkey: " BACKUP_HOTKEY_TEXT L"\nSaves to: ")) + g_saveDir;
     if (IsUnderOneDrive(g_saveDir))
         msg += Tr(L"\n此資料夾會同步到 OneDrive，可從右鍵選單更改。",
-                  L"\nThis folder syncs to OneDrive. You can change it from the right-click menu.");
-    Notify(Tr(APP_TITLE L" 已在背景執行", APP_TITLE L" is running in the background"), msg.c_str());
+                  L"\nSynced to OneDrive. Change it in the right-click menu.");
+    // 系統列圖示還沒加上時送不出去，等圖示加上後再顯示
+    if (!Notify(Tr(APP_TITLE L" 已在背景執行", APP_TITLE L" is running in the background"),
+                msg.c_str()))
+        return false;
 
     SetFirstRunDone();
     return true;
@@ -629,7 +648,7 @@ static void ShowMenu() {
 // ---- 視窗訊息 ---------------------------------------------
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (g_wmTaskbarCreated && msg == g_wmTaskbarCreated) {
-        Shell_NotifyIconW(NIM_ADD, &g_nid);   // Explorer 重啟，重新加入圖示
+        AddTrayIcon();   // Explorer 重啟，重新加入圖示
         return 0;
     }
 
@@ -645,7 +664,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
 
     case WM_TIMER:
-        if (wp == ID_TIMER_RETRY) {
+        if (wp == ID_TIMER_TRAY) {
+            // 圖示加上後，補上當時送不出去的首次提示（開機自啟時其他提示本來就不顯示）
+            if (AddTrayIcon() && g_prtscReady)
+                MaybeShowFirstRunTip();
+        } else if (wp == ID_TIMER_RETRY) {
             bool allRegistered = TryRegisterHotkeys();
             bool ready = IsPrtScReady();
             if (ready && !g_prtscReady) {
@@ -699,6 +722,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
     case WM_DESTROY:
         KillTimer(hwnd, ID_TIMER_RETRY);
+        KillTimer(hwnd, ID_TIMER_TRAY);
         Shell_NotifyIconW(NIM_DELETE, &g_nid);
         UnregisterHotKey(hwnd, ID_HOTKEY_PRTSC);
         UnregisterHotKey(hwnd, ID_HOTKEY_BACKUP);
@@ -765,7 +789,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR cmdLine, int) {
                                                GetSystemMetrics(SM_CXICON),
                                                GetSystemMetrics(SM_CYICON), 0);
     SetTrayTip();
-    Shell_NotifyIconW(NIM_ADD, &g_nid);
+    AddTrayIcon();
 
     // 全域快捷鍵：PrtSc＋備援熱鍵。註冊失敗或 PrtSc 被剪取工具攔走時，引導並每秒重新檢查。
     // 先啟動計時器：引導視窗開著時（MessageBox 仍會處理訊息）就能偵測到使用者關掉設定。

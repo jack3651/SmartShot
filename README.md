@@ -1,7 +1,7 @@
 # SmartShot
 
-**One-key screenshots for Windows — built for games and fullscreen.**
-**Windows 一鍵截圖，主打遊戲與全螢幕畫面。**
+**One-key screenshots for your Windows desktop and games.**
+**Windows 桌面與遊戲一鍵截圖。**
 
 [English](#english) ｜ [繁體中文](#繁體中文)
 
@@ -11,12 +11,13 @@ Download / 下載：**[itch.io](https://jack3651.itch.io/smartshot)** ｜ [GitHu
 
 ## English
 
-Press **PrtSc** and SmartShot saves a PNG of the screen you're looking at. No windows pop up, no editor opens — you just hear a shutter sound and keep playing.
+Press **PrtSc** and SmartShot saves a PNG of the screen you're looking at — your desktop or a game. No windows pop up, no editor opens — you just hear a shutter sound and keep going.
 
 ### Features
 
-- **One key, zero interruptions.** A successful screenshot only plays a shutter sound. Nothing steals focus from your game.
+- **One key, zero interruptions.** A successful screenshot only plays a shutter sound. Nothing steals focus from what you're doing.
 - **Captures the right screen.** Only the monitor with the active window is saved, not your whole multi-monitor desktop.
+- **No mouse cursor in your shots.** The pointer is left out, so it never covers what you wanted to capture. (Cursors drawn by a game itself, like crosshairs, are part of the picture.)
 - **Backup hotkey `Ctrl+Alt+S`** for when PrtSc is taken by another app or a game.
 - **Doesn't slow your game down.** PNG encoding runs on a low-priority background thread.
 - **Single portable exe** (~360 KB). No installer, no runtime, no network access.
@@ -72,12 +73,13 @@ SmartShot is free software under the **GNU General Public License v3.0**. See [L
 
 ## 繁體中文
 
-按 **PrtSc**，SmartShot 就把你正在看的那個螢幕存成 PNG。不跳視窗、不開編輯器，只會聽到一聲快門，然後繼續玩。
+按 **PrtSc**，SmartShot 就把你正在看的那個螢幕存成 PNG，桌面或遊戲都可以。不跳視窗、不開編輯器，只會聽到一聲快門，然後繼續做你的事。
 
 ### 特色
 
-- **一鍵、零打擾**：截圖成功只播快門聲，不會搶走遊戲的焦點。
+- **一鍵、零打擾**：截圖成功只播快門聲，不會搶走你正在用的視窗或遊戲的焦點。
 - **截對螢幕**：只存目前視窗所在的那個螢幕，不會把多螢幕整個桌面拼在一起。
+- **截圖不含滑鼠游標**：不會有游標擋住畫面。（遊戲自己畫的游標，例如準心，屬於遊戲畫面，會一起截到。）
 - **備援熱鍵 `Ctrl+Alt+S`**：PrtSc 被其他程式或遊戲佔用時使用。
 - **不拖慢遊戲**：PNG 編碼交給低優先權的背景執行緒。
 - **單一免安裝 exe**（約 360 KB），不需要安裝任何執行環境，也不連網。

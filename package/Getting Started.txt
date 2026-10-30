@@ -1,0 +1,41 @@
+﻿SmartShot - One-key screenshots for Windows
+============================================
+
+1. Start
+   Double-click SmartShot.exe. It runs in the system tray (bottom-right).
+   There is no main window. Right-click the tray icon for settings.
+
+2. Take a screenshot
+   Press PrtSc. A shutter sound means it worked.
+   Backup hotkey: Ctrl+Alt+S
+   Screenshots go to Pictures\SmartShot (change it from the tray menu).
+
+3. "Windows protected your PC"
+   SmartShot is not digitally signed, so Windows may warn you on first launch.
+   Make sure you downloaded it from https://jack3651.itch.io/smartshot or
+   https://github.com/jack3651/SmartShot/releases, then click
+   "More info" -> "Run anyway".
+   If your antivirus quarantines it, restore the file and add an exclusion.
+
+4. PrtSc opens the Snipping Tool instead (Windows 11)
+   SmartShot will offer to open Settings. Turn off
+   "Use the Print screen key to open screen capture".
+   It takes effect immediately. Until then, use Ctrl+Alt+S.
+
+5. Games
+   - Windowed and borderless fullscreen games work.
+   - Some exclusive fullscreen games may come out black. You'll hear an error
+     or warning sound instead of the shutter. Switch the game to borderless.
+   - If a game uses PrtSc itself, change the in-game key or use Ctrl+Alt+S.
+
+6. Start with Windows
+   Right-click the tray icon -> "Start with Windows".
+
+7. Uninstall
+   Untick "Start with Windows", exit SmartShot, then delete this folder.
+   Settings are in the registry at HKCU\Software\SmartShot (safe to delete).
+
+SmartShot never connects to the internet. Screenshots stay on your computer.
+
+Feedback: jacksnum2id@gmail.com
+License: GPL-3.0 (see LICENSE.txt). Source: https://github.com/jack3651/SmartShot

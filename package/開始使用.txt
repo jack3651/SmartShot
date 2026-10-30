@@ -1,0 +1,41 @@
+﻿SmartShot － Windows 一鍵截圖
+============================
+
+1. 啟動
+   雙擊 SmartShot.exe，程式會常駐在右下角的系統列。
+   沒有主視窗，設定都在系統列圖示的右鍵選單裡。
+
+2. 截圖
+   按 PrtSc，聽到快門聲就是成功了。
+   備援熱鍵：Ctrl+Alt+S
+   截圖存在「圖片\SmartShot」（可從右鍵選單更改）。
+
+3. 「Windows 已保護您的電腦」
+   SmartShot 沒有數位簽章，第一次執行時 Windows 可能會跳出警告。
+   請先確認檔案是從 https://jack3651.itch.io/smartshot 或
+   https://github.com/jack3651/SmartShot/releases 下載的，
+   再按「其他資訊」→「仍要執行」。
+   如果防毒軟體把檔案隔離了，請還原檔案並加入排除清單。
+
+4. 按 PrtSc 卻開啟了剪取工具（Windows 11）
+   SmartShot 會詢問是否打開設定，請關閉
+   「使用 Print Screen 鍵開啟螢幕擷取」。
+   關掉後立即生效。在那之前可以先用 Ctrl+Alt+S。
+
+5. 遊戲
+   - 視窗模式與無邊框全螢幕的遊戲可以正常截圖。
+   - 部分獨佔全螢幕遊戲可能截到全黑，這時會聽到錯誤音或警告音，
+     而不是快門聲。請把遊戲改成無邊框模式。
+   - 遊戲自己也用 PrtSc 時，請改掉遊戲內的截圖鍵，或改用 Ctrl+Alt+S。
+
+6. 開機自動啟動
+   系統列圖示按右鍵 →「開機時自動啟動」。
+
+7. 移除
+   取消「開機時自動啟動」、結束 SmartShot，再刪除這個資料夾即可。
+   設定存在登錄檔 HKCU\Software\SmartShot（可以放心刪除）。
+
+SmartShot 不會連上網路，截圖只會存在你的電腦裡。
+
+意見回饋：jacksnum2id@gmail.com
+授權：GPL-3.0（見 LICENSE.txt）。原始碼：https://github.com/jack3651/SmartShot

@@ -3,9 +3,11 @@
 **One-key screenshots for your Windows desktop and games.**
 **Windows 桌面與遊戲一鍵截圖。**
 
+by **JackDev**
+
 [English](#english) ｜ [繁體中文](#繁體中文)
 
-Download / 下載：**[itch.io](https://jack3651.itch.io/smartshot)** ｜ [GitHub Releases](https://github.com/jack3651/SmartShot/releases)
+Download / 下載：**[itch.io](https://jack3651.itch.io/smartshot)**（recommended / 建議） ｜ [GitHub Releases](https://github.com/jack3651/SmartShot/releases)（open-source edition / 開源版）
 
 ---
 
@@ -38,9 +40,13 @@ By default, Windows 11 uses PrtSc to open the Snipping Tool. SmartShot detects t
 ### Games and fullscreen
 
 - Windowed and **borderless fullscreen** games capture normally.
-- Some **exclusive fullscreen** games may come out black with the free version. You'll hear a warning or error sound instead of the shutter. Switching the game to borderless mode usually fixes it. (The black image is still saved, so you never lose a real black frame.)
+- Some **exclusive fullscreen** games may come out black with the open-source edition. You'll hear a warning or error sound instead of the shutter. Switching the game to borderless mode usually fixes it, or use the itch.io edition (see below). (The black image is still saved, so you never lose a real black frame.)
 - Games running as administrator may not receive PrtSc. Run SmartShot as administrator too if needed.
 - Some games use PrtSc for their own screenshots (e.g. World of Warcraft). Change the in-game key or use `Ctrl+Alt+S`.
+
+### itch.io edition vs. open-source edition
+
+Both are free and look the same. The **itch.io edition** adds DXGI Desktop Duplication: when the normal capture comes out black (e.g. in exclusive fullscreen games), it automatically retries with DXGI. It requires Windows 8 or later and is not open source. The **open-source edition** on GitHub Releases is built from this repository (GDI capture only, Windows 7 or later). Both use the same `SmartShot.exe` name and settings, so you can switch by replacing the file.
 
 ### "Windows protected your PC"
 
@@ -65,9 +71,9 @@ build_msvc.bat       :: MSVC: run from a Developer Command Prompt
 
 ### License
 
-SmartShot is free software under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
+Copyright (C) 2026 JackDev. The source code in this repository is free software under the **GNU General Public License v3.0**. See [LICENSE](LICENSE).
 
-**Contributing:** By submitting a pull request, you agree that your contribution is licensed under GPL-3.0 and that the author may also use it under other licenses (including in SmartShot Pro, a paid edition that adds DXGI capture for exclusive fullscreen games).
+**Contributing:** By submitting a pull request, you agree that your contribution is licensed under GPL-3.0 and that the author may also use it under other licenses (including in the itch.io edition, which adds DXGI capture and is not open source).
 
 ---
 
@@ -100,9 +106,13 @@ Windows 11 預設把 PrtSc 交給剪取工具。SmartShot 偵測到時會詢問�
 ### 遊戲與全螢幕
 
 - 視窗模式與**無邊框全螢幕**的遊戲可以正常截圖。
-- 部分**獨佔全螢幕**遊戲用免費版可能截到全黑，這時會聽到警告音或錯誤音，而不是快門聲。把遊戲改成無邊框模式通常就能解決。（全黑的圖也會照樣存檔，不會漏掉真正的黑畫面。）
+- 部分**獨佔全螢幕**遊戲用開源版可能截到全黑，這時會聽到警告音或錯誤音，而不是快門聲。把遊戲改成無邊框模式通常就能解決，或改用 itch.io 版（見下方）。（全黑的圖也會照樣存檔，不會漏掉真正的黑畫面。）
 - 以系統管理員權限執行的遊戲可能收不到 PrtSc，需要時請也用系統管理員身分執行 SmartShot。
 - 有些遊戲自己也用 PrtSc 截圖（例如魔獸世界），請改掉遊戲內的截圖鍵，或改用 `Ctrl+Alt+S`。
+
+### itch.io 版與開源版
+
+兩個版本都免費，外觀也相同。**itch.io 版**多了 DXGI 桌面複製擷取：一般擷取截到全黑時（例如獨佔全螢幕遊戲），會自動改用 DXGI 重截；需要 Windows 8 以上，不開源。GitHub Releases 上的**開源版**由本 repo 編譯（只用 GDI 擷取，Windows 7 以上）。兩者的檔名都是 `SmartShot.exe`、設定共用，直接替換檔案就能切換。
 
 ### 「Windows 已保護您的電腦」
 
@@ -127,6 +137,6 @@ build_msvc.bat       :: MSVC：在 Developer Command Prompt 中執行
 
 ### 授權
 
-SmartShot 是以 **GNU 通用公共授權條款第 3 版（GPL-3.0）** 釋出的自由軟體，詳見 [LICENSE](LICENSE)。
+Copyright (C) 2026 JackDev。本 repo 的原始碼是以 **GNU 通用公共授權條款第 3 版（GPL-3.0）** 釋出的自由軟體，詳見 [LICENSE](LICENSE)。
 
-**貢獻：** 送出 Pull Request 即表示你同意你的貢獻以 GPL-3.0 授權，且作者也可以用其他授權使用它（包括 SmartShot Pro：加入 DXGI 擷取、支援獨佔全螢幕遊戲的付費版）。
+**貢獻：** 送出 Pull Request 即表示你同意你的貢獻以 GPL-3.0 授權，且作者也可以用其他授權使用它（包括加入 DXGI 擷取、不開源的 itch.io 版）。

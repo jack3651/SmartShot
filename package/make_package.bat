@@ -1,8 +1,9 @@
 @echo off
 REM ============================================================
-REM  Build the download zip for itch.io / GitHub Releases (free edition).
+REM  Build the download zip of the open-source edition (GitHub Releases).
+REM  The itch.io edition (with DXGI) is packaged by the private repo.
 REM  Run build_mingw.bat first.
-REM  Output: dist\SmartShot-<version>.zip, containing a SmartShot-<version> folder with
+REM  Output: dist\SmartShot-OpenSource-<version>.zip, containing a folder of the same name with
 REM          SmartShot.exe, the readme files in package\ (*.txt) and LICENSE.txt.
 REM  The version comes from resource.h; the exe must have the same version.
 REM
@@ -31,7 +32,7 @@ if not "%EXEVER%"=="%VER%" (
     goto fail
 )
 
-set NAME=SmartShot-%VER%
+set NAME=SmartShot-OpenSource-%VER%
 set OUT=dist\%NAME%
 if exist "%OUT%" rmdir /s /q "%OUT%"
 mkdir "%OUT%" || goto fail

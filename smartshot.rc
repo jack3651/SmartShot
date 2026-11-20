@@ -4,11 +4,12 @@
 IDI_APP     ICON "smartshot.ico"
 IDR_SHUTTER WAVE "shutter.wav"
 
-// 介面上免費版與 Pro 都叫 SmartShot；只有原始檔名分得出是哪一版（開發測試用）
+// 兩個版本的 exe 都叫 SmartShot.exe（可以直接互相取代，開機自啟與設定共用）。
+// itch.io 版（SMARTSHOT_PRO，含 DXGI）與 GitHub 開源版只差在 Comments 欄位。
 #ifdef SMARTSHOT_PRO
-#define SMARTSHOT_EXE_NAME "SmartShotPro.exe"
+#define SMARTSHOT_EDITION "itch.io edition"
 #else
-#define SMARTSHOT_EXE_NAME "SmartShot.exe"
+#define SMARTSHOT_EDITION "Open-source edition (GPL-3.0)"
 #endif
 
 VS_VERSION_INFO VERSIONINFO
@@ -24,11 +25,14 @@ BEGIN
     BEGIN
         BLOCK "040404B0"
         BEGIN
+            VALUE "CompanyName",      "JackDev"
             VALUE "FileDescription",  "SmartShot"
             VALUE "FileVersion",      SMARTSHOT_VERSION_STR
             VALUE "ProductName",      "SmartShot"
             VALUE "ProductVersion",   SMARTSHOT_VERSION_STR
-            VALUE "OriginalFilename", SMARTSHOT_EXE_NAME
+            VALUE "OriginalFilename", "SmartShot.exe"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 JackDev"
+            VALUE "Comments",         SMARTSHOT_EDITION
         END
     END
     BLOCK "VarFileInfo"

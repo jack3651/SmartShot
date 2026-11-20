@@ -1,4 +1,5 @@
 ﻿SmartShot － Windows 一鍵截圖
+by JackDev（開源版）
 ============================
 
 1. 啟動
@@ -25,7 +26,8 @@
 5. 遊戲
    - 視窗模式與無邊框全螢幕的遊戲可以正常截圖。
    - 部分獨佔全螢幕遊戲可能截到全黑，這時會聽到錯誤音或警告音，
-     而不是快門聲。請把遊戲改成無邊框模式。
+     而不是快門聲。請把遊戲改成無邊框模式，或改用同樣免費、
+     會自動改用 DXGI 重截的 itch.io 版：https://jack3651.itch.io/smartshot
    - 遊戲自己也用 PrtSc 時，請改掉遊戲內的截圖鍵，或改用 Ctrl+Alt+S。
 
 6. 開機自動啟動
@@ -38,4 +40,5 @@
 SmartShot 不會連上網路，截圖只會存在你的電腦裡。
 
 意見回饋：jacksnum2id@gmail.com
+Copyright (C) 2026 JackDev
 授權：GPL-3.0（見 LICENSE.txt）。原始碼：https://github.com/jack3651/SmartShot

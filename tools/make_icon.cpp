@@ -209,6 +209,11 @@ static bool WriteCover(const wchar_t* path) {
     g.DrawString(L"One-key screenshots for your desktop and games", -1, &sub, RectF(0, 352, (REAL)W, 40), &center, &yellow);
     g.DrawString(L"桌面與遊戲一鍵截圖・按 PrtSc 就好", -1, &subZh, RectF(0, 396, (REAL)W, 40), &center, &soft);
 
+    // 作者署名（JackDev 是作者的顯示名稱，見《開源與回饋配套評估》第 7 節）
+    Font by(&latin, 19, FontStyleRegular, UnitPixel);
+    SolidBrush dim(Color(200, 255, 255, 255));
+    g.DrawString(L"by JackDev", -1, &by, RectF(0, 452, (REAL)W, 30), &center, &dim);
+
     CLSID png;
     GetPngClsid(&png);
     return cover.Save(path, &png, NULL) == Ok;

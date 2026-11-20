@@ -75,6 +75,11 @@ Copyright (C) 2026 JackDev. The source code in this repository is free software 
 
 **Contributing:** By submitting a pull request, you agree that your contribution is licensed under GPL-3.0 and that the author may also use it under other licenses (including in the itch.io edition, which adds DXGI capture and is not open source).
 
+### More from JackDev
+
+- **[AI Photo Appraiser](https://play.google.com/store/apps/details?id=com.JackDev.photoappraiser)** (Android) — snap a photo and let AI score it and estimate its value.
+- More tools and games: [jack3651.itch.io](https://jack3651.itch.io)
+
 ---
 
 ## 繁體中文
@@ -140,3 +145,8 @@ build_msvc.bat       :: MSVC：在 Developer Command Prompt 中執行
 Copyright (C) 2026 JackDev。本 repo 的原始碼是以 **GNU 通用公共授權條款第 3 版（GPL-3.0）** 釋出的自由軟體，詳見 [LICENSE](LICENSE)。
 
 **貢獻：** 送出 Pull Request 即表示你同意你的貢獻以 GPL-3.0 授權，且作者也可以用其他授權使用它（包括加入 DXGI 擷取、不開源的 itch.io 版）。
+
+### JackDev 的其他作品
+
+- **[AI 估價師：照片評分鑑定](https://play.google.com/store/apps/details?id=com.JackDev.photoappraiser)**（Android）：拍張照片，讓 AI 幫你評分、估價。
+- 更多工具與遊戲：[jack3651.itch.io](https://jack3651.itch.io)
